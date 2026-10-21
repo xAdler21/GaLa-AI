@@ -1,0 +1,17 @@
+[package]
+name = "doc-ir"
+description = "Gemeinsame Zwischenrepräsentation (Tokens, Zeilen, Geometrie) für Textebene, OCR, VLM, GAEB und Excel"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+serde.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+
+[lints]
+workspace = true

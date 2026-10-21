@@ -1,0 +1,27 @@
+[package]
+name = "ocr"
+description = "OCR-Abstraktion (OcrEngine-Trait) mit oar-ocr/PaddleOCR-Implementierung"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+doc-ir.workspace = true
+image.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+oar-ocr = { workspace = true, optional = true }
+
+[features]
+default = ["paddle"]
+# PaddleOCR (PP-OCR) über oar-ocr / ONNX Runtime
+paddle = ["dep:oar-ocr"]
+# ONNX Runtime mit CUDA (Produktivserver mit RTX 3070)
+cuda = ["paddle", "oar-ocr/cuda"]
+# Registrierte Modelle beim ersten Lauf automatisch nach $OAR_HOME laden
+auto-download = ["paddle", "oar-ocr/auto-download"]
+
+[lints]
+workspace = true

@@ -1,0 +1,75 @@
+# Infrastruktur auf dem Linux-Server (NVIDIA Container Toolkit erforderlich für GPU-Dienste).
+#
+#   docker compose up -d postgres                 # Datenbank
+#   docker compose --profile llm up -d llm        # LLM-Server (belegt ~6–7 GB VRAM)
+#   docker compose --profile bench run --rm bench ocr /data --preset v5-latin --device cuda
+#
+# Server und Worker kommen mit M1 dazu.
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg17
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-angebote}
+      POSTGRES_USER: ${POSTGRES_USER:-angebote}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD in .env setzen}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      retries: 10
+
+  llm:
+    image: ghcr.io/ggml-org/llama.cpp:server-cuda
+    profiles: ["llm"]
+    restart: unless-stopped
+    volumes:
+      - ./models:/models:ro
+    ports:
+      - "127.0.0.1:8080:8080"
+    command:
+      - --model
+      - /models/${LLM_MODEL:-Qwen_Qwen3.5-9B-Q4_K_M.gguf}
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8080"
+      - --n-gpu-layers
+      - "99"
+      - --ctx-size
+      - "${LLM_CTX:-16384}"
+      - --parallel
+      - "2"
+      - --jinja
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  bench:
+    build:
+      context: .
+      dockerfile: docker/bench.Dockerfile
+    profiles: ["bench"]
+    volumes:
+      - ${BENCH_DATA:-./corpus/private}:/data:ro
+      - ./bench-out:/out
+      - oar-models:/root/.oar
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+volumes:
+  pgdata:
+  oar-models:

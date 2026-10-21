@@ -1,0 +1,18 @@
+[package]
+name = "pdf"
+description = "PDF-Zugriff über PDFium: Textebene mit Bounding-Boxes, Seiten-Triage, Rendering für OCR"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+doc-ir.workspace = true
+pdfium-render.workspace = true
+image.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+
+[lints]
+workspace = true

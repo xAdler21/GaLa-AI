@@ -1,0 +1,27 @@
+[package]
+name = "bench"
+description = "M0-Benchmark: Textebene vs. OCR auf echten LVs messen (Seiten/s, Konfidenz, Zeichenfehlerrate)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+doc-ir.workspace = true
+pdf.workspace = true
+ocr = { workspace = true, features = ["auto-download"] }
+anyhow.workspace = true
+clap.workspace = true
+image.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[features]
+# OCR auf der GPU (Linux-Server mit CUDA 12 + cuDNN 9)
+cuda = ["ocr/cuda"]
+
+[lints]
+workspace = true

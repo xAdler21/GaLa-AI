@@ -1,0 +1,14 @@
+/target/
+**/*.rs.bk
+
+# Laufzeit-Binaries und Modelle werden nicht eingecheckt (Lizenz/Größe)
+/vendor/pdfium/
+/models/
+*.onnx
+*.gguf
+
+# Lokale Benchmark-Ergebnisse und echte Kunden-LVs
+/bench-out/
+/corpus/private/
+
+.env

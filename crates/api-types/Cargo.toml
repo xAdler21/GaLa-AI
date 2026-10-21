@@ -1,0 +1,20 @@
+[package]
+name = "api-types"
+description = "API- und Event-Typen, die Server und Leptos-Client (WASM) teilen"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+lv-model.workspace = true
+serde.workspace = true
+uuid.workspace = true
+chrono.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+
+[lints]
+workspace = true

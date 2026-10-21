@@ -1,0 +1,7 @@
+.git
+target
+vendor
+models
+corpus/private
+bench-out
+.env
