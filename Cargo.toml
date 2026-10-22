@@ -6,6 +6,8 @@ members = [
     "crates/api-types",
     "crates/pdf",
     "crates/ocr",
+    "crates/gaeb",
+    "crates/export",
     "apps/bench",
 ]
 
@@ -23,6 +25,8 @@ lv-model = { path = "crates/lv-model" }
 api-types = { path = "crates/api-types" }
 pdf = { path = "crates/pdf" }
 ocr = { path = "crates/ocr" }
+gaeb = { path = "crates/gaeb" }
+export = { path = "crates/export" }
 
 # Basis
 serde = { version = "1", features = ["derive"] }
@@ -43,6 +47,13 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 pdfium-render = "0.9"
 image = "0.25"
 oar-ocr = "0.10"
+
+# GAEB / Export
+roxmltree = "0.21"
+encoding_rs = "0.8"
+quick-xml = "0.42"
+rust_xlsxwriter = "0.101"
+calamine = "0.37"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

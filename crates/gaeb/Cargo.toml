@@ -1,0 +1,22 @@
+[package]
+name = "gaeb"
+description = "GAEB DA XML 3.x lesen (X81–X86) und Angebotsabgabe X84 schreiben"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+lv-model.workspace = true
+roxmltree.workspace = true
+quick-xml.workspace = true
+encoding_rs.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+rust_decimal.workspace = true
+rust_decimal_macros.workspace = true
+
+[lints]
+workspace = true

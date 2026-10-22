@@ -155,6 +155,39 @@ impl Lv {
             .filter_map(|p| p.gp.value.or_else(|| p.computed_gp()))
             .sum()
     }
+
+    pub fn positions_mut(&mut self) -> impl Iterator<Item = &mut Position> {
+        PositionsMut {
+            stack: vec![self.nodes.iter_mut()],
+        }
+    }
+
+    pub fn position_mut(&mut self, oz: &Oz) -> Option<&mut Position> {
+        self.positions_mut()
+            .find(|p| p.oz.value.as_ref() == Some(oz))
+    }
+}
+
+struct PositionsMut<'a> {
+    stack: Vec<std::slice::IterMut<'a, Node>>,
+}
+
+impl<'a> Iterator for PositionsMut<'a> {
+    type Item = &'a mut Position;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        while let Some(iter) = self.stack.last_mut() {
+            match iter.next() {
+                Some(Node::Position(p)) => return Some(p.as_mut()),
+                Some(Node::Titel(t)) => self.stack.push(t.children.iter_mut()),
+                Some(Node::Vorbemerkung(_)) => {}
+                None => {
+                    self.stack.pop();
+                }
+            }
+        }
+        None
+    }
 }
 
 struct Positions<'a> {

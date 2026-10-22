@@ -17,6 +17,8 @@ Alle KI-Funktionen laufen lokal (Xeon-Server mit RTX 3070). Architektur, Entsche
 | `crates/api-types` | Gemeinsame API- und Live-Event-Typen für Server und Client (WASM-tauglich) |
 | `crates/pdf` | PDFium-Anbindung: Textebene → Wort-Tokens, Seiten-Triage (Textebene oder OCR?), Rendern |
 | `crates/ocr` | `OcrEngine`-Trait und PaddleOCR über `oar-ocr` (CPU/CUDA) |
+| `crates/gaeb` | GAEB DA XML 3.x lesen (X81–X86, tolerant, ISO-8859-1) und X84-Angebotsabgabe aus der Original-X83 schreiben |
+| `crates/export` | Bepreistes LV als Excel mit Formeln, Titelsummen und MwSt. |
 | `apps/bench` | M0-Benchmark für Textebene und OCR an echten LVs |
 
 ## Entwicklung unter Windows

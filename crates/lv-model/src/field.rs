@@ -55,14 +55,9 @@ impl<T> Field<T> {
         }
     }
 
-    /// Aus Textebene/OCR gelesen. Ist der Rohtext nicht interpretierbar (`value == None`),
-    /// wird das Feld automatisch fürs Review markiert.
-    pub fn recognized(
-        value: Option<T>,
-        raw: impl Into<String>,
-        conf: f32,
-        prov: SourceRef,
-    ) -> Self {
+    /// Aus einer strukturierten Quelle (GAEB, Excel) ohne Seitenposition geparst. Ist der Rohtext
+    /// nicht interpretierbar (`value == None`), wird das Feld fürs Review markiert.
+    pub fn parsed(value: Option<T>, raw: impl Into<String>) -> Self {
         let raw = raw.into();
         let issues = if value.is_none() && !raw.trim().is_empty() {
             vec![ReviewIssue::Unparseable]
@@ -72,9 +67,23 @@ impl<T> Field<T> {
         Self {
             value,
             raw: Some(raw),
+            conf: 1.0,
+            prov: Vec::new(),
+            issues,
+        }
+    }
+
+    /// Aus Textebene/OCR gelesen, mit Konfidenz und Fundstelle auf der Seite.
+    pub fn recognized(
+        value: Option<T>,
+        raw: impl Into<String>,
+        conf: f32,
+        prov: SourceRef,
+    ) -> Self {
+        Self {
             conf,
             prov: vec![prov],
-            issues,
+            ..Self::parsed(value, raw)
         }
     }
 

@@ -16,5 +16,5 @@ pub use lv::{
     Titel, Vorbemerkung,
 };
 pub use oz::{Oz, OzMask};
-pub use rust_decimal::Decimal;
+pub use rust_decimal::{Decimal, RoundingStrategy};
 pub use unit::{Compatibility, Dimension, Unit};

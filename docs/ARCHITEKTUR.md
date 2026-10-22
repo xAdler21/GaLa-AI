@@ -12,7 +12,12 @@ Es soll:
 
 Alle KI-Funktionen laufen lokal (8-Core-Xeon, DDR4, RTX 3070 mit 8 GB).
 
-Stand: M0 begonnen. Workspace, Kern-Crates (`doc-ir`, `lv-model`, `api-types`, `pdf`, `ocr`) und das Benchmark-Tool `apps/bench` existieren.
+Stand:
+- **M0 begonnen:** Workspace, Kern-Crates (`doc-ir`, `lv-model`, `api-types`, `pdf`, `ocr`) und das Benchmark-Tool `apps/bench` existieren.
+- **M1 begonnen:** GAEB-Import/X84-Export (`gaeb`) und Excel-Export (`export`) stehen.
+- **Offen in M1:**
+  - GAEB 90 (D83)
+  - Datenbank, Job-Framework, Server, Leptos-UI
 
 ### Geklärte Entscheidungen
 | Thema | Entscheidung |
