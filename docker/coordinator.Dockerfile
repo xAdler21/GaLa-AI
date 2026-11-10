@@ -3,7 +3,9 @@
 # Build-Kontext ist das Repo-Root:
 #   docker build -f docker/coordinator.Dockerfile -t gala/coordinator .
 
-FROM rust:1-bookworm AS build
+# trixie statt bookworm: die vorgebaute ONNX Runtime (ort, Feature "embed")
+# braucht glibc >= 2.38 (__isoc23_strtol); bookworm hat 2.36.
+FROM rust:1-trixie AS build
 # rust-toolchain.toml verlangt u. a. das wasm32-Target (für die Desktop-App);
 # für den Server-Build genügt der mitgelieferte stable-Toolchain.
 ENV RUSTUP_TOOLCHAIN=stable
@@ -26,10 +28,10 @@ RUN --mount=type=cache,id=gala-cargo-registry,target=/usr/local/cargo/registry,s
     && mkdir -p /out \
     && cp target/release/coordinator /out/coordinator
 
-FROM debian:bookworm-slim
+FROM debian:trixie-slim
 # curl: Healthcheck im compose-File
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends libssl3 ca-certificates curl \
+    && apt-get install -y --no-install-recommends libssl3t64 ca-certificates curl \
     && rm -rf /var/lib/apt/lists/* \
     # UID/GID 10001 = Host-Nutzer "gala" (Dateien in /srv/gala/data, /var/lib/gala/state)
     && groupadd --system --gid 10001 gala \
