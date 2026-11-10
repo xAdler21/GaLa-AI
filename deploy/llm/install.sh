@@ -9,6 +9,7 @@
 set -euo pipefail
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+# shellcheck disable=SC2034 # wird von lib.sh gelesen
 GALA_REPO=$(cd "$SCRIPT_DIR/../.." && pwd)
 # shellcheck source=../common/lib.sh
 . "$SCRIPT_DIR/../common/lib.sh"

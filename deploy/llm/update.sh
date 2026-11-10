@@ -36,8 +36,7 @@ main() {
   "$REPO/deploy/common/dc.sh" llm up -d --remove-orphans
 
   # Modell laden dauert; /health antwortet 503, bis es fertig ist.
-  local i
-  for i in $(seq 1 60); do
+  for _ in $(seq 1 60); do
     if curl -fsS --max-time 3 http://127.0.0.1:8080/health >/dev/null 2>&1; then
       echo "[gala-llm] llama-server ist bereit."
       return 0

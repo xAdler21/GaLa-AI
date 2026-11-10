@@ -141,8 +141,8 @@ main() {
   dc coordinator up -d --remove-orphans
 
   step "Health-Check des Coordinators"
-  local ok=0 i
-  for i in $(seq 1 60); do
+  local ok=0
+  for _ in $(seq 1 60); do
     if curl -fsS --max-time 3 http://127.0.0.1:8080/api/v1/health >/dev/null 2>&1; then
       ok=1
       break
