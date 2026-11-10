@@ -25,8 +25,10 @@ RUN apt-get update \
 WORKDIR /src
 COPY . .
 # Cache-Mounts: Registry und Build-Verzeichnis überleben zwischen Builds.
-RUN --mount=type=cache,id=gala-cargo-registry,target=/usr/local/cargo/registry \
-    --mount=type=cache,id=gala-cargo-git,target=/usr/local/cargo/git \
+# sharing=locked: Coordinator und Worker teilen sich die Registry; parallele
+# Builds (compose) würden sonst gleichzeitig dieselben Crates entpacken.
+RUN --mount=type=cache,id=gala-cargo-registry,target=/usr/local/cargo/registry,sharing=locked \
+    --mount=type=cache,id=gala-cargo-git,target=/usr/local/cargo/git,sharing=locked \
     --mount=type=cache,id=gala-target-worker,target=/src/target \
     cargo build --release --locked -p worker ${FEATURES:+--features $FEATURES} \
     && mkdir -p /out/lib \

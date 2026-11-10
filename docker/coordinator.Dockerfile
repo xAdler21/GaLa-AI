@@ -18,8 +18,9 @@ ARG FEATURES="embed"
 COPY . .
 # Cache-Mounts: Registry und Build-Verzeichnis überleben zwischen Builds.
 # Das Binary wird innerhalb desselben RUN aus dem Cache-Mount herauskopiert.
-RUN --mount=type=cache,id=gala-cargo-registry,target=/usr/local/cargo/registry \
-    --mount=type=cache,id=gala-cargo-git,target=/usr/local/cargo/git \
+# sharing=locked: die Registry wird mit dem Worker-Build geteilt (siehe dort).
+RUN --mount=type=cache,id=gala-cargo-registry,target=/usr/local/cargo/registry,sharing=locked \
+    --mount=type=cache,id=gala-cargo-git,target=/usr/local/cargo/git,sharing=locked \
     --mount=type=cache,id=gala-target-coordinator,target=/src/target \
     cargo build --release --locked -p coordinator --features "$FEATURES" \
     && mkdir -p /out \
