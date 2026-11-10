@@ -259,9 +259,10 @@ Ein Platzcheck: `df -h /srv/gala /var/lib/docker`, `docker system df`. Alte Buil
 Die GTX 950 (2 GB) ist die schwächste Stelle der Planung:
 
 - **CUDA-Version:** Maxwell (sm_52) wird nur bis **CUDA 12.x** unterstützt, **CUDA 13 hat Maxwell entfernt**. Auf der VM muss deshalb ein Treiberzweig installiert sein, der die GTX 950 noch unterstützt (Branch 580 oder älter; darüber wird Maxwell nicht mehr berücksichtigt), und im Container CUDA 12.x (Standard: `nvidia/cuda:12.8.1-cudnn-runtime-ubuntu24.04`, wie `docker/bench.Dockerfile`).
-- **ONNX Runtime:** Die von `ort` geladene CUDA-Build von ONNX Runtime muss Kernel für **sm_52** enthalten. Das ist nicht bei jeder Version der Fall. Zu prüfen im M0-Benchmark auf der echten Karte (Fehlerbild: `no kernel image is available for execution on the device` oder stilles Zurückfallen auf CPU).
+- **ONNX Runtime (Stand 10.11.2026: GPU-OCR läuft nicht):** `ort` 2.0.0-rc.13 lädt beim Build eine vorgebaute ONNX Runtime 1.28, die es nur für **CUDA 13** gibt (`ort-sys`: „we only ship 13 for now“). Im CUDA-12-Container fehlt ihr `libcublasLt.so.13`, und CUDA 13 kennt Maxwell nicht mehr. Fehlerbild im Log des Workers: `Failed to load library …/libonnxruntime_providers_cuda.so with error: libcublasLt.so.13`, danach `Successfully registered CPUExecutionProvider`. Der Worker läuft dann auf der CPU weiter. GPU-OCR auf der GTX 950 braucht eine eigene ONNX-Runtime-Build gegen CUDA 12 (`ORT_LIB_LOCATION` bzw. Feature `load-dynamic` von `ort`); ob deren Kernel sm_52 enthalten, ist offen.
 - **VRAM:** 2 GB sind knapp für OCR **und** BGE-M3. Bei „out of memory“ kleinere Batches oder die Vision-Rolle ohne GPU nutzen.
-- **Fallback CPU-OCR:** In `/etc/gala/ocr.env` `GALA_WORKER_FEATURES=` (leer) und `GALA_CUDA_RUNTIME_IMAGE=debian:bookworm-slim` setzen, die GPU-Reservierung in `deploy/ocr/compose.yml` (Block `deploy.resources.reservations`) entfernen und neu bauen: `dc.sh ocr up -d --build`. Das ist langsamer, aber ohne CUDA-Abhängigkeit.
+- **CPU-OCR:** In `/etc/gala/ocr.env` `GALA_OCR_DEVICE=cpu` setzen und `dc.sh ocr up -d`. Das Feature `vision` bleibt an (ohne es beendet sich `--role vision`), Image und GPU-Reservierung können bleiben. Das ist langsamer, aber ohne CUDA-Abhängigkeit.
+- **GPU-Nutzung prüfen:** `nvidia-smi` auf der VM muss bei laufendem Worker den Prozess mit belegtem VRAM zeigen. Steht dort kein Prozess, rechnet die CPU.
 
 ### 8.4 Allgemeine Checks
 

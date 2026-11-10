@@ -26,7 +26,8 @@ uuid.workspace = true
 [features]
 default = []
 # Rolle `vision` auf der OCR-VM: Embeddings (BGE-M3) und GPU-OCR.
-vision = ["retrieval/fastembed", "dep:ocr", "ocr/cuda"]
+# auto-download: OCR-Modelle beim ersten Start nach $OAR_HOME laden (Volume oar-models).
+vision = ["retrieval/fastembed", "dep:ocr", "ocr/cuda", "ocr/auto-download"]
 
 [lints]
 workspace = true
