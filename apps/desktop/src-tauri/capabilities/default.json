@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Minimale Rechte fuer das Hauptfenster. Alle Netzwerkzugriffe laufen ueber eigene Rust-Commands; Updater, Store und Prozess-Plugin werden nur aus Rust genutzt.",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}

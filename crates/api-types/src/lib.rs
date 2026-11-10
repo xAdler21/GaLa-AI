@@ -4,6 +4,8 @@
 //! Die Events werden per SSE an `/jobs/{id}/events` gestreamt. `seq` ist monoton steigend und
 //! dient als `Last-Event-ID`, damit ein Client nach einem Verbindungsabbruch lückenlos weiterliest.
 
+pub mod client;
+
 use chrono::{DateTime, Utc};
 use lv_model::{Decimal, Oz, Unit};
 use serde::{Deserialize, Serialize};

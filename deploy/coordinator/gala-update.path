@@ -1,0 +1,11 @@
+[Unit]
+Description=GaLa-AI: Server-Update angefordert (Admin-Panel)
+
+[Path]
+# Der Coordinator (kein root) legt diese Datei an; update.sh liest und loescht sie.
+PathExists=/var/lib/gala/state/update-request.json
+Unit=gala-update.service
+MakeDirectory=no
+
+[Install]
+WantedBy=multi-user.target

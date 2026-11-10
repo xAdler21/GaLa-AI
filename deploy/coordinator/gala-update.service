@@ -1,0 +1,14 @@
+[Unit]
+Description=GaLa-AI: Server-Update ausfuehren
+After=docker.service network-online.target
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=oneshot
+# /bin/bash explizit: unabhaengig vom Executable-Bit in git
+ExecStart=/bin/bash /opt/gala/deploy/coordinator/update.sh
+TimeoutStartSec=3600
+# Nicht automatisch wiederholen: bei einem Fehler steht der Status "failed" in
+# update-status.json, der Admin loest das Update erneut aus.
+Restart=no

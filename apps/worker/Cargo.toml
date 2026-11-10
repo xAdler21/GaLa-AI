@@ -1,0 +1,32 @@
+[package]
+name = "worker"
+description = "Worker für die OCR-VM (vision) und CPU-Aufgaben"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+db.workspace = true
+doc-ir.workspace = true
+ingest.workspace = true
+ocr = { workspace = true, optional = true }
+pdf.workspace = true
+retrieval.workspace = true
+sqlx = { version = "0.9.0", default-features = false, features = ["runtime-tokio", "tls-rustls", "postgres", "uuid", "chrono"] }
+tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros", "signal", "time", "sync"] }
+tokio-util = "0.7.20"
+tracing.workspace = true
+tracing-subscriber.workspace = true
+uuid.workspace = true
+
+[features]
+default = []
+# Rolle `vision` auf der OCR-VM: Embeddings (BGE-M3) und GPU-OCR.
+vision = ["retrieval/fastembed", "dep:ocr", "ocr/cuda"]
+
+[lints]
+workspace = true

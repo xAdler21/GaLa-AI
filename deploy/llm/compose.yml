@@ -1,0 +1,56 @@
+# gala-llm: llama-server (OpenAI-kompatibel) auf RTX 3070 + GTX 1070.
+#
+#   /opt/gala/deploy/common/dc.sh llm up -d
+#
+# Variablen aus /etc/gala/hosts.env und /etc/gala/llm.env.
+# Der Port 8080 wird nur für gala-coordinator und gala-ocr freigegeben
+# (ufw + DOCKER-USER, siehe install.sh).
+
+name: gala
+
+services:
+  llama:
+    # Tag in llm.env fest auf einen Build pinnen (z. B. server-cuda-b1234),
+    # sonst ändert sich das Verhalten unbemerkt mit jedem Pull.
+    image: ghcr.io/ggml-org/llama.cpp:${LLAMA_IMAGE_TAG:-server-cuda}
+    container_name: gala-llama
+    restart: unless-stopped
+    init: true
+    environment:
+      # Reihenfolge der GPUs wie im PCI-Bus (nvidia-smi), nicht "schnellste zuerst".
+      # Damit ist GPU 0 stabil die RTX 3070 (--main-gpu 0), prüfen: docs/BETRIEB.md
+      CUDA_DEVICE_ORDER: PCI_BUS_ID
+      NVIDIA_VISIBLE_DEVICES: all
+    volumes:
+      - /srv/gala/models:/models:ro
+    ports:
+      - "8080:8080"
+    command:
+      - --model
+      - /models/${LLM_MODEL:?LLM_MODEL in /etc/gala/llm.env setzen}
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8080"
+      - --n-gpu-layers
+      - "99"
+      # Gesamt-Kontext; verteilt auf --parallel Slots (je Slot = LLM_CTX / 2)
+      - --ctx-size
+      - "${LLM_CTX:-16384}"
+      - --split-mode
+      - layer
+      # Verteilung der Layer auf GPU 0 (3070) und GPU 1 (1070), z. B. 3,2
+      - --tensor-split
+      - "${LLM_TENSOR_SPLIT:-1,1}"
+      - --main-gpu
+      - "0"
+      - --parallel
+      - "2"
+      - --jinja
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]

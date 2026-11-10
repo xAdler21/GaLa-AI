@@ -1,4 +1,8 @@
-# GaLaBau-Angebotsautomatisierung – Architektur & Umsetzungsplan
+# GaLa-AI – Architektur & Umsetzungsplan
+
+> GaLa-AI vereint zwei Vorhaben: die Angebotsautomatisierung (dieses Dokument, ab „Kontext“) und den Dokumenten-Chatbot über das Netzlaufwerk (Abschnitt D).
+>
+> Seit November 2026 ist die Hardware auf drei VMs verteilt (Abschnitt „VM-Aufteilung“). Wo ältere Abschnitte von „der 3070“ als einziger GPU sprechen, gilt die VM-Aufteilung. Die Verträge zwischen den Teilen stehen in [CLAUDE.md](../CLAUDE.md).
 
 ## Kontext
 
@@ -26,8 +30,10 @@ Stand:
 | Ausgabe | GAEB X84, PDF-Angebot und Excel, pro Angebot wählbar |
 | Materialanfragen | Alle drei Modi bauen (nur Dokumente / Mail nach Freigabe / vollautomatisch), umschaltbar per Feature-Flag |
 | Kalkulation | Beide Modi: EP-basiert (ähnliche alte EPs × Index) **und** Aufgliederung (Lohn/Material/Gerät/Fremdleistung/Zuschläge) |
-| Clients | Leptos (WASM) als Web-App, dieselbe UI in Tauri v2 als Desktop-App |
-| Server | Linux, nur LAN/VPN, 1–5 Nutzer, Altbestand > 500 LVs |
+| Clients | **Nur Desktop-App** (Tauri v2 + Leptos) mit Installer und Auto-Updater. Keine Web-App für Endnutzer (Entscheidung des Nutzers, November 2026). Der Coordinator liefert ein kleines Web-Panel für Download und Administration. |
+| Server | Linux, nur LAN/VPN, 1–5 Nutzer, Altbestand > 500 LVs; drei VMs (LLM, OCR, Coordinator) |
+| Dokumenten-Chatbot | Teil von GaLa-AI: indexiert das Netzlaufwerk (überwiegend Papier → OCR) und beantwortet Fragen mit Quellen |
+| Claude-Zugang | Nutzer `claude` mit sudo auf allen VMs; im Admin-Panel per Schalter ein- und ausschaltbar |
 
 ### Zur Sprachwahl Rust/WASM
 Rust ist hier eine gute Wahl, allerdings aus anderen Gründen als reiner Rechengeschwindigkeit:
@@ -67,6 +73,30 @@ Rust ist hier eine gute Wahl, allerdings aus anderen Gründen als reiner Recheng
 | Deployment | docker compose auf Linux (NVIDIA Container Toolkit) | Container: postgres, server, worker, llama-server |
 
 ---
+
+## VM-Aufteilung (ab November 2026)
+
+```
+                       ┌──────────────── gala-coordinator (keine GPU) ────────────────┐
+ Desktop-App (Tauri) ──┼─► Caddy :443 ─► coordinator (axum)                            │
+ Web-Panel (Browser) ──┘                   REST /api/v1 · Web-Panel · Update-Server    │
+                       │                 worker --role cpu (Scan, Text, Chunking)      │
+                       │                 Postgres 17 + pgvector · Datei-Store (NFS)    │
+                       └───────────┬───────────────────────────────┬──────────────────┘
+                                   │ Postgres, NFS                 │ HTTP (OpenAI-API)
+              ┌────────────────────▼───────────┐       ┌───────────▼──────────────────────┐
+              │ gala-ocr: GTX 950 (2 GB)       │       │ gala-llm: RTX 3070 + GTX 1070    │
+              │ worker --role vision           │──────►│ llama-server, 16 GB Layer-Split  │
+              │ OCR (oar-ocr), Embeddings      │       │ 12–14B-Modell, Treiber 580       │
+              └────────────────────────────────┘       └──────────────────────────────────┘
+               Netzlaufwerk (NAS) read-only unter /mnt/archiv auf gala-coordinator und gala-ocr
+```
+
+Was sich gegenüber dem Einzelserver-Entwurf weiter unten ändert:
+- **GPU-Arbiter:** Der Phasenwechsel zwischen VISION und LLM auf einer 8-GB-Karte entfällt, weil OCR und LLM eigene GPUs haben. Der Arbiter schrumpft zu einer Ressourcen-Zuordnung: `gpu_vision`-Tasks laufen auf gala-ocr, `gpu_llm`-Aufrufe gehen per HTTP an gala-llm.
+- **LLM:** 16 GB über zwei Karten erlauben 12–14B-Modelle statt 7–9B. Der Layer-Split braucht kaum PCIe-Bandbreite; die langsamere 1070 kostet etwas Tempo (geschätzt 20–30 Token/s).
+- **OCR-GPU:** Die GTX 950 hat nur 2 GB und Maxwell (sm_52). OCR und Embedding passen hinein. Das VLM für Handschrift (~0,9B) passt nicht; es läuft bei Bedarf auf gala-llm oder auf der CPU. Ob ONNX Runtime/CUDA die 950 noch unterstützt, klärt M0. Fallback ist CPU-OCR.
+- **Clients:** Es gibt nur die Desktop-App. Das Web-Panel des Coordinators dient nur dem Download und der Administration.
 
 ## Systemarchitektur
 
@@ -343,16 +373,43 @@ task_dep(task_id, depends_on)        job_event(seq bigserial, job_id, ts, body j
 - **PDF:** typst-Templates für das Angebotsschreiben und das bepreiste LV mit Briefkopf, Summen je Titel, Nachlass und MwSt.
 - **Excel:** bepreistes LV mit Formeln, optional mit Aufgliederungsspalten (Lohn/Material/Gerät).
 
+## D. Dokumenten-Chatbot
+
+Beantwortet Fragen zum Inhalt des Netzlaufwerks, z. B. „Welche Pflastersteine hatten wir 2019 beim Kita-Projekt?“.
+
+1. **Scan:** `worker --role cpu` läuft periodisch über `/mnt/archiv`.
+   - Neue, geänderte und gelöschte Dateien erkennt er über Größe, mtime und sha256.
+   - Unterstützt: PDF, Excel, GAEB, Text.
+2. **Text gewinnen:** Für PDFs mit Textebene liefert sie die Seiten-Triage aus Abschnitt A. Alle anderen Seiten werden zu `ocr_page`-Aufgaben für gala-ocr. Der Altbestand ist überwiegend Papier; das OCR-Backlog ist daher der erste große Job.
+3. **Chunking:** seitenbewusst und absatzbasiert, ~2.500 Zeichen mit einem Absatz Überlappung.
+4. **Embeddings:** BGE-M3 (1024 Dimensionen) auf gala-ocr. Speicherung in `chunk.emb` (pgvector, HNSW) plus deutscher Volltextindex (`tsvector`).
+5. **Antwort:**
+   - Hybride Suche: dense + Volltext, zusammengeführt per RRF, Top 8.
+   - Das LLM auf gala-llm antwortet nur aus den nummerierten Quellen und zitiert sie als [1], [2].
+   - Die App zeigt Datei, Seite und Ausschnitt.
+
+**Tipps für die Digitalisierung:**
+- 300 dpi in Graustufen scannen.
+- Einen Einzugsscanner verwenden.
+- Die erkannten Texte zurück in die PDFs schreiben (durchsuchbare PDFs), damit auch die Windows-Suche sie findet.
+
+Der Engpass ist das Scannen, nicht die Rechenleistung.
+
 ## Deployment und Betrieb
 
-- docker compose auf dem Linux-Server mit diesen Services:
-  - `postgres` (pgvector)
-  - `server` (axum, liefert auch das Leptos-WASM-Bundle aus)
-  - `worker` (GPU, NVIDIA runtime)
-  - `llama-server` (CUDA-Image)
+Details stehen in [BETRIEB.md](BETRIEB.md). Kurz:
+- Drei VMs, je eine `deploy/<vm>/compose.yml`:
+  - `gala-coordinator`: postgres, coordinator, worker --role cpu, caddy
+  - `gala-ocr`: worker --role vision
+  - `gala-llm`: llama-server
+- Das Web-Panel des Coordinators bietet:
+  - Download des Installers
+  - Admin-Login
+  - Server-Update, Wartungsmodus, Desktop-Releases
+  - den Schalter für den Claude-Zugang
 - Dateien (Original-PDFs, gerenderte Seiten, Exporte) liegen content-addressed (sha256) in einem Volume, die Metadaten in Postgres.
 - Backups: `pg_dump` täglich plus Dateivolume.
-- Tauri-Desktop-Client mit signiertem Updater, der auf eine JSON-Datei auf dem eigenen Server zeigt.
+- Tauri-Desktop-Client mit signiertem Updater. Er fragt den Coordinator (`/api/v1/updates/...`); Releases werden im Admin-Panel hochgeladen und veröffentlicht.
 - Einstellungen und Feature-Flags liegen in der Tabelle `settings` und sind im Admin-UI umschaltbar.
 
 ---

@@ -1,0 +1,13 @@
+[Unit]
+Description=GaLa-AI: Port-Beschraenkung fuer Docker (DOCKER-USER)
+After=docker.service
+Requires=docker.service
+PartOf=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/lib/gala/docker-firewall.sh
+
+[Install]
+WantedBy=multi-user.target

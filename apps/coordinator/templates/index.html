@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+
+{% block title %}GaLa-AI{% endblock %}
+
+{% block body %}
+<main class="landing">
+  <h1>GaLa-AI</h1>
+  <p class="lead">Angebotsautomatisierung und Dokumenten-Chat für den GaLaBau-Betrieb.</p>
+
+  {% if let Some(version) = version %}
+  <p>
+    <a class="button big" href="/download">GaLa-AI für Windows herunterladen</a>
+  </p>
+  <p class="muted">Aktuelle Version {{ version }}{% if let Some(d) = pub_date %} vom {{ d }}{% endif %}</p>
+  {% if !notes.is_empty() %}
+  <section class="card">
+    <h2>Neu in dieser Version</h2>
+    <pre class="notes">{{ notes }}</pre>
+  </section>
+  {% endif %}
+  {% else %}
+  <p class="muted">Es ist noch keine Version zum Download veröffentlicht.</p>
+  {% endif %}
+
+  <section class="card">
+    <h2>Hinweise zur Installation</h2>
+    <p>Die App spricht ausschließlich mit diesem Server. Damit Windows der Verbindung vertraut, muss einmalig das Zertifikat der internen Zertifizierungsstelle installiert sein.</p>
+    {% if has_ca %}
+    <p><a class="button secondary" href="/ca.crt">CA-Zertifikat herunterladen</a></p>
+    {% endif %}
+  </section>
+
+  <p class="muted footer"><a href="/admin/login">Administration</a></p>
+</main>
+{% endblock %}

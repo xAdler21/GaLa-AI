@@ -1,0 +1,11 @@
+<div id="update-status"{% if update.running %} hx-get="/admin/update/status" hx-trigger="every 3s" hx-swap="outerHTML"{% endif %}>
+  <p>
+    Status: <span class="badge {{ update.state }}">{{ update.state_label }}</span>
+    {% if update.pending %}<span class="badge pending">Anfrage wartet auf Ausführung</span>{% endif %}
+  </p>
+  {% if let Some(r) = update.git_ref %}<p class="muted">Referenz: {{ r }}</p>{% endif %}
+  {% if let Some(t) = update.started_at %}<p class="muted">Gestartet: {{ t }}</p>{% endif %}
+  {% if let Some(t) = update.finished_at %}<p class="muted">Beendet: {{ t }}</p>{% endif %}
+  {% if let Some(m) = update.message %}<p>{{ m }}</p>{% endif %}
+  {% if !update.log.is_empty() %}<pre class="log">{{ update.log }}</pre>{% endif %}
+</div>

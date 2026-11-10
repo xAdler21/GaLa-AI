@@ -8,8 +8,18 @@ members = [
     "crates/ocr",
     "crates/gaeb",
     "crates/export",
+    "crates/db",
+    "crates/llm",
+    "crates/retrieval",
+    "crates/ingest",
+    "crates/chat",
     "apps/bench",
+    "apps/coordinator",
+    "apps/worker",
 ]
+# Die Desktop-App (Tauri + Leptos/WASM) ist ein eigener Workspace, weil sie
+# webkit/WebView2 und trunk braucht. Sie bindet api-types per Pfad ein.
+exclude = ["apps/desktop"]
 
 [workspace.package]
 version = "0.1.0"
@@ -27,6 +37,11 @@ pdf = { path = "crates/pdf" }
 ocr = { path = "crates/ocr" }
 gaeb = { path = "crates/gaeb" }
 export = { path = "crates/export" }
+db = { path = "crates/db" }
+llm = { path = "crates/llm" }
+retrieval = { path = "crates/retrieval" }
+ingest = { path = "crates/ingest" }
+chat = { path = "crates/chat" }
 
 # Basis
 serde = { version = "1", features = ["derive"] }

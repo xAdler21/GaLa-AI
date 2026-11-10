@@ -1,18 +1,22 @@
-# Infrastruktur auf dem Linux-Server (NVIDIA Container Toolkit erforderlich für GPU-Dienste).
+# LOKALE ENTWICKLUNG (eine Maschine, alles auf localhost).
+# Der Betrieb auf den drei Server-VMs liegt in deploy/ (siehe docs/BETRIEB.md).
 #
-#   docker compose up -d postgres                 # Datenbank
+# NVIDIA Container Toolkit ist nur für die GPU-Profile (llm, bench) erforderlich.
+#
+#   docker compose up -d postgres                 # Datenbank auf 127.0.0.1:5432
 #   docker compose --profile llm up -d llm        # LLM-Server (belegt ~6–7 GB VRAM)
 #   docker compose --profile bench run --rm bench ocr /data --preset v5-latin --device cuda
 #
-# Server und Worker kommen mit M1 dazu.
+# Coordinator und Worker laufen lokal per cargo, z. B.:
+#   DATABASE_URL=postgres://gala:<passwort>@127.0.0.1:5432/gala cargo run -p coordinator
 
 services:
   postgres:
     image: pgvector/pgvector:pg17
     restart: unless-stopped
     environment:
-      POSTGRES_DB: ${POSTGRES_DB:-angebote}
-      POSTGRES_USER: ${POSTGRES_USER:-angebote}
+      POSTGRES_DB: ${POSTGRES_DB:-gala}
+      POSTGRES_USER: ${POSTGRES_USER:-gala}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD in .env setzen}
     volumes:
       - pgdata:/var/lib/postgresql/data

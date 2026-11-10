@@ -1,0 +1,22 @@
+[package]
+name = "chat"
+description = "Dokumenten-Chatbot: Retrieval + LLM-Antwort mit Quellen"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+api-types.workspace = true
+llm.workspace = true
+retrieval.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tokio = { version = "1.54.1", features = ["rt", "macros"] }
+uuid.workspace = true
+
+[lints]
+workspace = true

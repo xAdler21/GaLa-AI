@@ -1,0 +1,30 @@
+[package]
+name = "ingest"
+description = "Netzlaufwerk scannen, Text gewinnen, chunken, Index-Aufgaben"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+calamine.workspace = true
+chrono.workspace = true
+doc-ir.workspace = true
+encoding_rs.workspace = true
+gaeb.workspace = true
+lv-model.workspace = true
+pdf.workspace = true
+sha2 = "0.11.1"
+sqlx = { version = "0.9.0", default-features = false, features = ["runtime-tokio", "tls-rustls", "postgres", "uuid", "chrono"] }
+thiserror.workspace = true
+tokio = { version = "1.54.1", features = ["rt"] }
+tracing.workspace = true
+uuid.workspace = true
+walkdir = "2.5.0"
+
+[dev-dependencies]
+tempfile = "3.27.0"
+
+[lints]
+workspace = true

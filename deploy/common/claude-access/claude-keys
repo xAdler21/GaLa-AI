@@ -1,0 +1,58 @@
+#!/bin/bash
+# AuthorizedKeysCommand für den Nutzer "claude" (sshd ruft es als "nobody" auf).
+#   /usr/local/lib/gala/claude-keys %u
+#
+# Gibt die erlaubten öffentlichen Schlüssel auf stdout aus, wenn der Schalter
+# "Claude-Zugang" im Admin-Panel an ist; sonst nichts (= Login abgelehnt).
+# Für jeden anderen Nutzer als "claude" wird nie etwas ausgegeben.
+#
+# Konfiguration (optional) in /etc/gala/claude-access.conf, nur diese Zeilen:
+#   FAIL_MODE=closed|open     Verhalten, wenn der Coordinator nicht erreichbar ist
+#                             (Standard: closed = kein Zugang)
+#   COORDINATOR_URL=http://gala-coordinator:8081
+set -u
+
+user=${1:-}
+[ "$user" = "claude" ] || exit 0
+
+CONF=/etc/gala/claude-access.conf
+KEYS=/etc/gala/claude_authorized_keys
+FAIL_MODE=closed
+COORDINATOR_URL=http://gala-coordinator:8081
+
+# Die Konfiguration wird NICHT gesourct, sondern streng zeilenweise geparst.
+if [ -r "$CONF" ]; then
+  v=$(sed -n 's/^FAIL_MODE=\(open\|closed\)[[:space:]]*$/\1/p' "$CONF" | tail -n 1)
+  [ -n "$v" ] && FAIL_MODE=$v
+  v=$(sed -n 's|^COORDINATOR_URL=\(http://[A-Za-z0-9._:-]*\)[[:space:]]*$|\1|p' "$CONF" | tail -n 1)
+  [ -n "$v" ] && COORDINATOR_URL=$v
+fi
+
+emit_keys() {
+  [ -r "$KEYS" ] && cat "$KEYS"
+  exit 0
+}
+
+# Antwort: {"enabled": true|false, "changed_at": ...}
+if resp=$(curl -fsS --max-time 3 "$COORDINATOR_URL/internal/claude-access" 2>/dev/null); then
+  if command -v jq >/dev/null 2>&1; then
+    enabled=$(printf '%s' "$resp" | jq -r 'if (.enabled | type) == "boolean" then .enabled else "invalid" end' 2>/dev/null) || enabled=invalid
+  elif printf '%s' "$resp" | grep -Eq '"enabled"[[:space:]]*:[[:space:]]*true([^A-Za-z0-9_]|$)'; then
+    enabled=true
+  elif printf '%s' "$resp" | grep -Eq '"enabled"[[:space:]]*:[[:space:]]*false([^A-Za-z0-9_]|$)'; then
+    enabled=false
+  else
+    enabled=invalid
+  fi
+  case "$enabled" in
+    true) emit_keys ;;
+    false) exit 0 ;;
+  esac
+  # sonst: Antwort unbrauchbar, wie "nicht erreichbar" behandeln
+fi
+
+# Coordinator nicht erreichbar (oder Antwort ungültig)
+if [ "$FAIL_MODE" = "open" ]; then
+  emit_keys
+fi
+exit 0

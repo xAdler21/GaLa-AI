@@ -1,0 +1,6 @@
+[Unit]
+Description=GaLa-AI: claude-Sitzungen beenden, wenn der Zugang aus ist
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/lib/gala/claude-reaper

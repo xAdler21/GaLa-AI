@@ -1,0 +1,24 @@
+#!/bin/bash
+# Beendet laufende Sitzungen des Nutzers "claude", sobald der Zugang nicht
+# (mehr) erlaubt ist. Aufgerufen alle 30 s von gala-claude-reaper.timer (als root).
+#
+# "Zugang erlaubt" heißt hier genau: claude-keys liefert Schlüssel. Damit gelten
+# dieselben Regeln wie beim Login, einschließlich FAIL_MODE bei nicht
+# erreichbarem Coordinator (closed -> Sitzungen enden, open -> bleiben bestehen).
+set -u
+
+id claude >/dev/null 2>&1 || exit 0
+
+keys=$(/usr/local/lib/gala/claude-keys claude 2>/dev/null) || keys=""
+[ -n "$keys" ] && exit 0
+
+# Gibt es überhaupt Prozesse/Sitzungen des Nutzers? Sonst nichts tun.
+if ! pgrep -u claude >/dev/null 2>&1 && ! loginctl list-sessions --no-legend 2>/dev/null | awk '{print $3}' | grep -qx claude; then
+  exit 0
+fi
+
+echo "claude-Zugang aus: beende Sitzungen des Nutzers claude"
+loginctl terminate-user claude 2>/dev/null || true
+sleep 1
+pkill -KILL -u claude 2>/dev/null || true
+exit 0

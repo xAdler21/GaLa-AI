@@ -1,0 +1,29 @@
+# TLS mit interner CA: Caddy erzeugt eine eigene Root-CA und stellt damit die
+# Zertifikate aus. Die Root-CA (root.crt) wird von copy-ca.sh nach
+# $GALA_DATA_DIR/ca.crt kopiert; der Coordinator liefert sie auf der
+# Startseite zum Download aus, damit Windows-Clients ihr vertrauen können.
+{
+	# Kein ACME/Let's Encrypt, kein Port 80
+	auto_https disable_redirects
+	# Die CA nicht in den (Container-)Trust-Store installieren, das macht
+	# der Betreiber bzw. die Desktop-App selbst
+	skip_install_trust
+}
+
+# Name und IP, unter denen der Server angesprochen wird (Variablen aus compose)
+{$GALA_HOSTNAME:gala-coordinator}, {$GALA_HOST_IP:localhost} {
+	tls internal
+
+	# Interne Routen gehören nie über den öffentlichen Weg
+	@internal path /internal /internal/*
+	respond @internal 404
+
+	encode zstd gzip
+
+	# Große Uploads (Desktop-Installer im Admin-Panel)
+	request_body {
+		max_size 1GB
+	}
+
+	reverse_proxy coordinator:8080
+}

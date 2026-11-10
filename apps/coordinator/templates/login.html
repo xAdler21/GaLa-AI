@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+
+{% block title %}Anmeldung – GaLa-AI{% endblock %}
+
+{% block body %}
+<main class="narrow">
+  <h1>GaLa-AI Administration</h1>
+  {% if let Some(e) = error %}
+  <p class="alert error">{{ e }}</p>
+  {% endif %}
+  <form method="post" action="/admin/login" class="card stack">
+    <label>Benutzername
+      <input name="username" autocomplete="username" required autofocus>
+    </label>
+    <label>Passwort
+      <input name="password" type="password" autocomplete="current-password" required>
+    </label>
+    <button type="submit">Anmelden</button>
+  </form>
+  <p class="muted footer"><a href="/">Zur Startseite</a></p>
+</main>
+{% endblock %}

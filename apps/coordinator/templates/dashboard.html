@@ -1,0 +1,193 @@
+{% extends "base.html" %}
+
+{% block title %}Administration – GaLa-AI{% endblock %}
+
+{% block body %}
+<header class="topbar">
+  <strong>GaLa-AI Administration</strong>
+  <span class="spacer"></span>
+  <span class="muted">{{ username }}</span>
+  <form method="post" action="/admin/logout" class="inline"><button type="submit" class="secondary small">Abmelden</button></form>
+</header>
+
+<main class="grid">
+  {% if let Some(f) = flash %}<p class="alert ok">{{ f }}</p>{% endif %}
+  {% if let Some(e) = error %}<p class="alert error">{{ e }}</p>{% endif %}
+
+  <section class="card" id="wartung">
+    <h2>Wartungsmodus</h2>
+    <p>
+      Zustand:
+      {% if maintenance.enabled %}<span class="badge failed">aktiv</span>{% else %}<span class="badge succeeded">aus</span>{% endif %}
+      {% if let Some(s) = maintenance.since %}<span class="muted">seit {{ s }}</span>{% endif %}
+    </p>
+    <p class="muted">Im Wartungsmodus sind alle Funktionen der Desktop-App außer Anmeldung und Updates gesperrt.</p>
+    <form method="post" action="/admin/maintenance" class="stack">
+      <label>Meldung für die Anwender
+        <input name="message" value="{{ maintenance.message }}" maxlength="300" placeholder="z. B. Update läuft, ca. 10 Minuten">
+      </label>
+      {% if maintenance.enabled %}
+      <input type="hidden" name="enabled" value="false">
+      <button type="submit">Wartungsmodus beenden</button>
+      {% else %}
+      <input type="hidden" name="enabled" value="true">
+      <button type="submit" class="danger">Wartungsmodus einschalten</button>
+      {% endif %}
+    </form>
+  </section>
+
+  <section class="card" id="claude">
+    <h2>Claude-Zugang</h2>
+    <p>
+      Zustand:
+      {% if claude.enabled %}<span class="badge failed">AN</span>{% else %}<span class="badge succeeded">AUS</span>{% endif %}
+    </p>
+    <p class="muted">
+      Steuert den SSH-Zugang des Nutzers <code>claude</code> auf allen drei VMs
+      (gala-coordinator, gala-ocr, gala-llm). Ist der Schalter aus, wird kein Schlüssel mehr
+      ausgeliefert und laufende Sitzungen werden innerhalb von etwa 30 Sekunden beendet.
+      Der eigene Admin-Zugang des Betreibers ist davon nicht betroffen.
+    </p>
+    {% if let Some(t) = claude.changed_at %}
+    <p class="muted">Zuletzt geändert: {{ t }}{% if let Some(u) = claude.changed_by %} von {{ u }}{% endif %}</p>
+    {% endif %}
+    <form method="post" action="/admin/claude-access">
+      {% if claude.enabled %}
+      <input type="hidden" name="enabled" value="false">
+      <button type="submit">Claude-Zugang ausschalten</button>
+      {% else %}
+      <input type="hidden" name="enabled" value="true">
+      <button type="submit" class="danger" onclick="return confirm('Claude-Zugang auf allen VMs einschalten?')">Claude-Zugang einschalten</button>
+      {% endif %}
+    </form>
+  </section>
+
+  <section class="card" id="update">
+    <h2>Server-Update</h2>
+    <form method="post" action="/admin/update" class="stack">
+      <label>Git-Referenz (Branch, Tag oder Commit)
+        <input name="git_ref" value="main" required maxlength="100" pattern="[A-Za-z0-9._/\-]+">
+      </label>
+      <label class="check">
+        <input type="checkbox" name="maintenance" value="true" checked>
+        Wartungsmodus währenddessen aktivieren
+      </label>
+      <button type="submit" onclick="return confirm('Server-Update jetzt starten?')">Update starten</button>
+    </form>
+    {% include "update_status.html" %}
+  </section>
+
+  <section class="card wide" id="releases">
+    <h2>Desktop-Releases</h2>
+    <form method="post" action="/admin/releases" enctype="multipart/form-data" class="stack">
+      <div class="row">
+        <label>Version (SemVer)
+          <input name="version" required placeholder="0.2.0" pattern="[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.\-]+)?">
+        </label>
+        <label>Installer (*-setup.exe)
+          <input type="file" name="installer" accept=".exe" required>
+        </label>
+      </div>
+      <label>Notizen
+        <textarea name="notes" rows="3" placeholder="Was ist neu?"></textarea>
+      </label>
+      <div class="row">
+        <label>Signatur (Inhalt der .sig-Datei)
+          <textarea name="signature" rows="2"></textarea>
+        </label>
+        <label>oder .sig-Datei
+          <input type="file" name="signature_file" accept=".sig">
+        </label>
+      </div>
+      <button type="submit">Hochladen</button>
+      <p class="muted">Ein neues Release ist erst nach „Veröffentlichen“ für Download und Updater sichtbar.</p>
+    </form>
+
+    {% if releases.is_empty() %}
+    <p class="muted">Noch keine Releases.</p>
+    {% else %}
+    <div class="scroll">
+    <table>
+      <thead><tr><th>Version</th><th>Datei</th><th>Hochgeladen</th><th>Status</th><th></th></tr></thead>
+      <tbody>
+      {% for r in releases %}
+        <tr>
+          <td><strong>{{ r.version }}</strong>{% if !r.notes.is_empty() %}<br><span class="muted">{{ r.notes }}</span>{% endif %}</td>
+          <td>{{ r.file_name }}</td>
+          <td>{{ r.created_at }}</td>
+          <td>{% if r.published %}<span class="badge succeeded">veröffentlicht</span>{% if let Some(p) = r.published_at %}<br><span class="muted">{{ p }}</span>{% endif %}{% else %}<span class="badge idle">Entwurf</span>{% endif %}</td>
+          <td class="actions">
+            {% if r.published %}
+            <form method="post" action="/admin/releases/{{ r.id }}/unpublish" class="inline"><button class="secondary small">Zurückziehen</button></form>
+            {% else %}
+            <form method="post" action="/admin/releases/{{ r.id }}/publish" class="inline"><button class="small">Veröffentlichen</button></form>
+            {% endif %}
+            <form method="post" action="/admin/releases/{{ r.id }}/delete" class="inline" onsubmit="return confirm('Release {{ r.version }} samt Datei endgültig löschen?')"><button class="danger small">Löschen</button></form>
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    {% endif %}
+  </section>
+
+  <section class="card wide" id="users">
+    <h2>Benutzer</h2>
+    <div class="scroll">
+    <table>
+      <thead><tr><th>Name</th><th>Rolle</th><th>Angelegt</th><th>Status</th><th></th></tr></thead>
+      <tbody>
+      {% for u in users %}
+        <tr>
+          <td>{{ u.username }}</td>
+          <td>{{ u.role }}</td>
+          <td>{{ u.created_at }}</td>
+          <td>{% if u.disabled %}<span class="badge failed">gesperrt</span>{% else %}<span class="badge succeeded">aktiv</span>{% endif %}</td>
+          <td class="actions">
+            {% if !u.is_self %}
+            {% if u.disabled %}
+            <form method="post" action="/admin/users/{{ u.id }}/enable" class="inline"><button class="secondary small">Entsperren</button></form>
+            {% else %}
+            <form method="post" action="/admin/users/{{ u.id }}/disable" class="inline"><button class="secondary small">Sperren</button></form>
+            {% endif %}
+            {% endif %}
+            <form method="post" action="/admin/users/{{ u.id }}/password" class="inline">
+              <input type="password" name="password" placeholder="Neues Passwort" minlength="8" required autocomplete="new-password">
+              <button class="secondary small">Passwort setzen</button>
+            </form>
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    <h3>Neuen Benutzer anlegen</h3>
+    <form method="post" action="/admin/users" class="row">
+      <label>Name <input name="username" required autocomplete="off"></label>
+      <label>Passwort <input type="password" name="password" minlength="8" required autocomplete="new-password"></label>
+      <label>Rolle
+        <select name="role">
+          <option value="kalkulator">kalkulator</option>
+          <option value="admin">admin</option>
+        </select>
+      </label>
+      <button type="submit">Anlegen</button>
+    </form>
+  </section>
+
+  <section class="card wide" id="audit">
+    <h2>Audit-Log (letzte 50 Einträge)</h2>
+    <div class="scroll">
+    <table class="compact">
+      <thead><tr><th>Zeit</th><th>Nutzer</th><th>Aktion</th><th>Details</th></tr></thead>
+      <tbody>
+      {% for a in audit %}
+        <tr><td class="nowrap">{{ a.at }}</td><td>{{ a.who }}</td><td>{{ a.action }}</td><td class="mono">{{ a.detail }}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    </div>
+  </section>
+</main>
+{% endblock %}

@@ -1,0 +1,4 @@
+target/
+ui/dist/
+# Tauri 2 erzeugt die Schemas beim Build neu.
+src-tauri/gen/
