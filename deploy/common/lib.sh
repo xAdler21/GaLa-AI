@@ -59,12 +59,13 @@ load_hosts() {
       192.0.2.* | *NAS-IP*) die "$v in $GALA_ETC/hosts.env ist noch der Platzhalter ($val)." ;;
     esac
   done
-  # gala-ocr und gala-llm dürfen noch fehlen (Aufbau in Etappen): Wert "none".
-  for v in GALA_COORDINATOR_IP GALA_LAN_CIDR GALA_NAS_SHARE; do
+  # gala-ocr, gala-llm und das NAS dürfen noch fehlen (Aufbau in Etappen): Wert "none".
+  for v in GALA_COORDINATOR_IP GALA_LAN_CIDR; do
     [ "${!v}" != none ] || die "$v darf nicht 'none' sein."
   done
   vm_present ocr || warn "gala-ocr ist als 'none' eingetragen: OCR/Embeddings laufen noch nicht."
   vm_present llm || warn "gala-llm ist als 'none' eingetragen: der Chatbot antwortet noch nicht."
+  [ "$GALA_NAS_SHARE" != none ] || warn "GALA_NAS_SHARE ist 'none': /mnt/archiv bleibt leer."
   GALA_NAS_SMB_VERS=${GALA_NAS_SMB_VERS:-3.0}
 }
 
@@ -75,6 +76,12 @@ vm_present() {
     llm) [ "${GALA_LLM_IP:-none}" != none ] ;;
     *) return 0 ;;
   esac
+}
+
+# GALA_LAN_CIDR darf mehrere Netze enthalten, durch Komma getrennt
+# (z. B. LAN und VPN). Gibt sie einzeln aus, eins pro Zeile.
+lan_cidrs() {
+  tr ',' '\n' <<<"$GALA_LAN_CIDR" | sed '/^$/d'
 }
 
 # Trägt gala-coordinator/gala-ocr/gala-llm in /etc/hosts ein (verwalteter Block).
@@ -126,8 +133,12 @@ docker_after_mounts() {
 
 # NAS (SMB) read-only nach /mnt/archiv. Zugangsdaten in /etc/gala/cifs-archiv.cred (0600).
 setup_cifs_archiv() {
-  apt_install cifs-utils
   install -d -m 0755 /mnt/archiv
+  if [ "$GALA_NAS_SHARE" = none ]; then
+    log "GALA_NAS_SHARE ist 'none': NAS wird nicht eingebunden."
+    return 0
+  fi
+  apt_install cifs-utils
   local cred="$GALA_ETC/cifs-archiv.cred"
   if [ ! -f "$cred" ]; then
     (
@@ -157,7 +168,10 @@ ufw_base() {
   apt_install ufw
   ufw default deny incoming >/dev/null
   ufw default allow outgoing >/dev/null
-  ufw allow from "$GALA_LAN_CIDR" to any port 22 proto tcp comment 'gala: ssh' >/dev/null
+  local net
+  for net in $(lan_cidrs); do
+    ufw allow from "$net" to any port 22 proto tcp comment 'gala: ssh' >/dev/null
+  done
 }
 
 ufw_allow_from() { # <quelle> <port> <kommentar>

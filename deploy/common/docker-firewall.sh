@@ -52,7 +52,9 @@ case "$ROLE" in
   coordinator)
     protect 5432 "$GALA_OCR_IP"
     protect 8081 "$GALA_COORDINATOR_IP" "$GALA_OCR_IP" "$GALA_LLM_IP"
-    protect 443 "$GALA_LAN_CIDR"
+    # GALA_LAN_CIDR: ein oder mehrere Netze, durch Komma getrennt
+    IFS=, read -ra lan <<<"$GALA_LAN_CIDR"
+    protect 443 "${lan[@]}"
     ;;
   llm)
     protect 8080 "$GALA_COORDINATOR_IP" "$GALA_OCR_IP"

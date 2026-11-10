@@ -66,7 +66,9 @@ docker_after_mounts mnt-archiv.mount
 
 log "Firewall (ufw + DOCKER-USER)"
 ufw_base
-ufw_allow_from "$GALA_LAN_CIDR" 443 'caddy'
+for net in $(lan_cidrs); do
+  ufw_allow_from "$net" 443 'caddy'
+done
 # 5432 und 8081 sind Docker-Ports: ufw greift dort nicht, siehe docker-firewall.sh.
 # Die ufw-Regeln dokumentieren die Absicht und gelten, falls ein Dienst nicht in Docker läuft.
 if vm_present ocr; then
