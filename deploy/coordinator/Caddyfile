@@ -8,6 +8,9 @@
 	# Die CA nicht in den (Container-)Trust-Store installieren, das macht
 	# der Betreiber bzw. die Desktop-App selbst
 	skip_install_trust
+	# Clients, die per IP verbinden, senden kein SNI. Ohne default_sni bricht
+	# Caddy den Handshake dann ab (TLS-Alert "internal error").
+	default_sni {$GALA_HOST_IP:localhost}
 }
 
 # Name und IP, unter denen der Server angesprochen wird (Variablen aus compose)
