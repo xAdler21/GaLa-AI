@@ -50,10 +50,11 @@ Reihenfolge: VMs vorbereiten → Bootstrap → `install.sh` je VM (coordinator z
 
 ### 2.1 Voraussetzungen je VM
 
-1. Ubuntu Server 24.04, feste IP, Hostname passend (`gala-coordinator`, `gala-ocr`, `gala-llm`), eigener Admin-Nutzer mit sudo und SSH-Schlüssel.
-2. Docker Engine und compose-Plugin ([Anleitung](https://docs.docker.com/engine/install/ubuntu/)).
-3. GPU-VMs: NVIDIA-Treiber und NVIDIA Container Toolkit (siehe Abschnitt 7 und 8).
-4. Repo nach `/opt/gala` klonen. Die VMs brauchen dafür Lesezugriff auf das Git-Repo (z. B. Deploy-Key mit Nur-Lese-Recht oder Token in der Remote-URL):
+1. Ubuntu Server 24.04 oder neuer (gala-coordinator läuft auf 26.04), feste IP, Hostname passend (`gala-coordinator`, `gala-ocr`, `gala-llm`), eigener Admin-Nutzer mit sudo und SSH-Schlüssel.
+2. **CPU mit AVX/AVX2 in der VM.** Die ONNX Runtime (BGE-M3 im Coordinator mit Feature `embed`, OCR/Embeddings auf gala-ocr) stürzt sonst beim Start mit SIGILL ab (Container-Exit-Code 132). In Proxmox den CPU-Typ auf `host` (oder `x86-64-v3`) stellen; der Standardtyp (`kvm64`/„QEMU Virtual CPU“) hat kein AVX. Prüfen: `grep -cw avx2 /proc/cpuinfo`. Ohne AVX den Coordinator mit `GALA_COORDINATOR_FEATURES=` (leer) in `/etc/gala/coordinator.env` bauen.
+3. Docker Engine, compose-Plugin und buildx. Unter Ubuntu reichen die Distributionspakete: `sudo apt install docker.io docker-compose-v2 docker-buildx`.
+4. GPU-VMs: NVIDIA-Treiber und NVIDIA Container Toolkit (siehe Abschnitt 7 und 8).
+5. Repo nach `/opt/gala` klonen. Die VMs brauchen dafür Lesezugriff auf das Git-Repo (z. B. Deploy-Key mit Nur-Lese-Recht oder Token in der Remote-URL):
    ```bash
    sudo git clone <repo-url> /opt/gala
    ```
@@ -137,7 +138,7 @@ sudo /opt/gala/deploy/common/dc.sh coordinator exec coordinator coordinator admi
 # weitere Nutzer: --role kalkulator; Passwort ändern: admin set-password --username <name>
 ```
 
-Danach Anmeldung im Admin-Panel unter `https://gala-coordinator/admin`.
+Danach Anmeldung im Admin-Panel unter `https://gala-coordinator/admin`. Ohne DNS-Eintrag geht auch die IP (`https://10.10.0.235/admin`); dann `GALA_PUBLIC_URL` in `coordinator.env` auf die IP setzen, damit Download- und Update-URLs stimmen.
 
 ### 2.7 Erstes Desktop-Release
 
