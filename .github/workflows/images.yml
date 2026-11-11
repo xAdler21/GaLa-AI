@@ -1,0 +1,143 @@
+name: Images
+
+# Baut die Server-Images, testet sie und legt sie in die GitHub-Registry (ghcr.io).
+# Die VMs laden sie von dort (deploy/common/images.sh) und bauen nicht mehr selbst.
+#
+#   ghcr.io/<besitzer>/<repo>/coordinator:<commit-sha>
+#   ghcr.io/<besitzer>/<repo>/worker-cpu:<commit-sha>
+#   ghcr.io/<besitzer>/<repo>/worker-vision:<commit-sha>
+#   ghcr.io/<besitzer>/<repo>/bench:<commit-sha>
+# Zusätzlich jeweils das Tag "main".
+#
+# Bewusst schlichte docker-Befehle statt build-push-action: das Bench-Image setzt
+# auf dem lokal gebauten Worker-Image auf (FROM), das geht nur im Docker-Daemon
+# selbst. Dafür gibt es keinen Layer-Cache zwischen den Läufen (ein Lauf ca. 15 min).
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  image:
+    name: ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: coordinator
+            dockerfile: docker/coordinator.Dockerfile
+            build_args: FEATURES=embed
+          - name: worker-cpu
+            dockerfile: docker/worker.Dockerfile
+            build_args: ""
+          - name: worker-vision
+            dockerfile: docker/worker.Dockerfile
+            build_args: >-
+              FEATURES=vision
+              BUILD_IMAGE=rust:1-trixie
+              RUNTIME_IMAGE=nvidia/cuda:12.8.1-cudnn-runtime-ubuntu24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      # Das Vision-Image (CUDA-Laufzeit, Rust-Build, ONNX-Runtime-Paket) braucht
+      # mehr Platz, als der Runner frei hat.
+      - name: Platz schaffen
+        if: matrix.name == 'worker-vision'
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android /opt/hostedtoolcache/CodeQL
+          df -h /
+
+      - name: Image-Namen
+        run: |
+          repo="ghcr.io/${GITHUB_REPOSITORY,,}"
+          echo "REPO=$repo" >>"$GITHUB_ENV"
+          echo "IMAGE=$repo/${{ matrix.name }}" >>"$GITHUB_ENV"
+
+      - name: Bauen
+        run: |
+          args=()
+          for a in ${{ matrix.build_args }}; do
+            args+=(--build-arg "$a")
+          done
+          docker build -f "${{ matrix.dockerfile }}" "${args[@]}" \
+            --build-arg "GALA_BUILD_REV=${GITHUB_SHA::7}" \
+            --label "org.opencontainers.image.source=https://github.com/${GITHUB_REPOSITORY}" \
+            --label "org.opencontainers.image.revision=${GITHUB_SHA}" \
+            -t "$IMAGE:$GITHUB_SHA" -t "$IMAGE:main" .
+
+      - name: "Test: Binary startet"
+        run: docker run --rm "$IMAGE:$GITHUB_SHA" --help
+
+      # --- nur worker-vision: Bibliotheken, Bench-Image, echte OCR auf der CPU ---
+
+      - name: "Test: CUDA-12-Provider vollständig"
+        if: matrix.name == 'worker-vision'
+        run: |
+          docker run --rm --entrypoint sh "$IMAGE:$GITHUB_SHA" -c \
+            'ls -la /usr/local/lib/gala && ldd /usr/local/lib/gala/libonnxruntime_providers_cuda.so' | tee ldd.txt
+          # Der Provider muss gegen CUDA 12 gebaut sein (CUDA 13 kennt die GTX 950 nicht).
+          grep -q 'libcublasLt.so.12 => /' ldd.txt
+          # libcuda.so.1 und libnvidia-* kommen erst zur Laufzeit vom Treiber des Hosts.
+          if grep 'not found' ldd.txt | grep -v -e 'libcuda\.so\.1' -e 'libnvidia'; then
+            echo "Dem CUDA-Provider fehlen Bibliotheken im Image." >&2
+            exit 1
+          fi
+
+      - name: Bench-Image bauen
+        if: matrix.name == 'worker-vision'
+        run: |
+          docker build -f docker/bench.Dockerfile \
+            --build-arg "WORKER_IMAGE=$IMAGE:$GITHUB_SHA" \
+            --label "org.opencontainers.image.source=https://github.com/${GITHUB_REPOSITORY}" \
+            --label "org.opencontainers.image.revision=${GITHUB_SHA}" \
+            -t "$REPO/bench:$GITHUB_SHA" -t "$REPO/bench:main" .
+
+      - name: "Test: OCR auf der CPU (Modelle laden, Test-PDF erkennen)"
+        if: matrix.name == 'worker-vision'
+        run: |
+          mkdir -p "$RUNNER_TEMP/in"
+          python3 deploy/ocr/mk-test-pdf.py "$RUNNER_TEMP/in/test-lv.pdf"
+          chmod -R a+rX "$RUNNER_TEMP/in"
+          docker run --rm -v "$RUNNER_TEMP/in:/in:ro" "$REPO/bench:$GITHUB_SHA" \
+            ocr /in --device cpu --max-pages 2 2>&1 | tee ocr.log
+          grep -q '^Seiten: 2,' ocr.log
+          # Erkannt werden muss wirklich Text: jede Seite hat rund 50 Zeilen.
+          tokens=$(sed -n 's/.* \([0-9][0-9]*\) Tokens .*/\1/p' ocr.log | sort -n | head -n1)
+          echo "wenigste Tokens je Seite: ${tokens:-keine}"
+          [ "${tokens:-0}" -ge 100 ]
+
+      - name: "Test: ohne GPU bricht --device cuda ab statt still auf der CPU zu rechnen"
+        if: matrix.name == 'worker-vision'
+        run: |
+          set +e
+          docker run --rm -v "$RUNNER_TEMP/in:/in:ro" "$REPO/bench:$GITHUB_SHA" \
+            ocr /in --device cuda --max-pages 1 >cuda.log 2>&1
+          rc=$?
+          set -e
+          tail -n 5 cuda.log
+          if [ "$rc" -eq 0 ]; then
+            echo "bench lief ohne GPU mit --device cuda durch (stiller CPU-Rückfall)." >&2
+            exit 1
+          fi
+          grep -q 'CUDA-Provider' cuda.log
+
+      # --- Veröffentlichen ---
+
+      - name: Anmelden an ghcr.io
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Hochladen
+        run: |
+          docker push "$IMAGE:$GITHUB_SHA"
+          docker push "$IMAGE:main"
+          if [ "${{ matrix.name }}" = worker-vision ]; then
+            docker push "$REPO/bench:$GITHUB_SHA"
+            docker push "$REPO/bench:main"
+          fi

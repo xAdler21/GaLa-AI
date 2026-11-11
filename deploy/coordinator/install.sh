@@ -97,8 +97,10 @@ systemctl daemon-reload
 systemctl enable --now gala-update.path gala-backup.timer
 
 if [ "$START" -eq 1 ]; then
-  log "Stack bauen und starten (der erste Build dauert einige Minuten)"
-  dc coordinator up -d --build
+  log "Images bereitstellen und Stack starten"
+  /bin/bash "$GALA_REPO/deploy/common/images.sh" coordinator \
+    "$(git -c safe.directory="$GALA_REPO" -C "$GALA_REPO" rev-parse HEAD)"
+  dc coordinator up -d
   "$SCRIPT_DIR/copy-ca.sh"
 else
   log "--no-start: Stack nicht gestartet."

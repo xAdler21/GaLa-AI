@@ -1,6 +1,7 @@
 # gala-ocr: worker --role vision (OCR + Embeddings) auf der GTX 950.
 #
-#   /opt/gala/deploy/common/dc.sh ocr up -d --build
+#   /opt/gala/deploy/common/dc.sh ocr up -d
+# Das Image stellt vorher deploy/common/images.sh bereit (Registry oder lokaler Build).
 #
 # Variablen aus /etc/gala/hosts.env und /etc/gala/ocr.env.
 # Hinweis GTX 950 (Maxwell, sm_52): siehe docs/BETRIEB.md.
@@ -17,7 +18,9 @@ services:
         # trixie: die vorgebaute ONNX Runtime braucht glibc >= 2.38 (siehe worker.Dockerfile)
         BUILD_IMAGE: ${GALA_WORKER_BUILD_IMAGE:-rust:1-trixie}
         RUNTIME_IMAGE: ${GALA_CUDA_RUNTIME_IMAGE:-nvidia/cuda:12.8.1-cudnn-runtime-ubuntu24.04}
-    image: gala/worker-vision:local
+        GALA_BUILD_REV: ${GALA_BUILD_REV:-}
+    # Registry-Image eines Commits oder lokal gebaut: deploy/common/images.sh
+    image: ${GALA_IMAGE_REPO:-gala}/worker-vision:${GALA_IMAGE_TAG:-local}
     container_name: gala-worker-vision
     restart: unless-stopped
     init: true
@@ -30,6 +33,8 @@ services:
       RUST_LOG: ${RUST_LOG:-info}
       # cuda (Standard) oder cpu, siehe docs/BETRIEB.md (GTX-950-Risiko)
       GALA_OCR_DEVICE: ${GALA_OCR_DEVICE:-cuda}
+      # Fester Name für das Admin-Panel (sonst die wechselnde Container-ID)
+      GALA_WORKER_NAME: gala-ocr-vision
       # Nur die GTX 950 (die VM hat genau eine GPU)
       NVIDIA_VISIBLE_DEVICES: all
       NVIDIA_DRIVER_CAPABILITIES: compute,utility

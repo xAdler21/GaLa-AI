@@ -1,0 +1,49 @@
+<div id="index-status" hx-get="/admin/index/status" hx-trigger="every 15s" hx-swap="outerHTML">
+  {% for w in index.warnings %}<p class="alert warn">{{ w }}</p>{% endfor %}
+
+  <h3>Worker</h3>
+  {% if index.workers.is_empty() %}
+  <p class="muted">Noch kein Worker hat sich gemeldet.</p>
+  {% else %}
+  <div class="scroll">
+  <table class="compact">
+    <thead><tr><th>Name</th><th>Rolle</th><th>OCR-Gerät</th><th>Stand</th><th>Gestartet</th><th>Letzte Meldung</th><th>Status</th></tr></thead>
+    <tbody>
+    {% for w in index.workers %}
+      <tr>
+        <td>{{ w.name }}</td>
+        <td>{{ w.role }}</td>
+        <td>{{ w.device }}</td>
+        <td class="mono">{{ w.build_rev }}</td>
+        <td class="nowrap">{{ w.started_at }}</td>
+        <td class="nowrap">{{ w.last_seen }}</td>
+        <td>{% if w.alive %}<span class="badge succeeded">aktiv</span>{% else %}<span class="badge failed">keine Meldung</span>{% endif %}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% endif %}
+
+  <h3>Warteschlange</h3>
+  <div class="scroll">
+  <table class="compact">
+    <thead><tr><th>Aufgabe</th><th class="num">Wartend</th><th class="num">Läuft</th><th class="num">Gescheitert</th></tr></thead>
+    <tbody>
+    {% for q in index.queue %}
+      <tr>
+        <td>{{ q.label }}</td>
+        <td class="num">{{ q.pending }}</td>
+        <td class="num">{{ q.running }}</td>
+        <td class="num">{% if q.failed > 0 %}<span class="badge failed">{{ q.failed }}</span>{% else %}0{% endif %}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+
+  <p class="muted">
+    Dokumente: {{ index.docs_total }} gesamt, {{ index.docs_indexed }} indexiert,
+    {{ index.docs_in_progress }} in Arbeit, {{ index.docs_failed }} gescheitert.
+  </p>
+</div>

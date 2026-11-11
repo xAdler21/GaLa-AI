@@ -2874,6 +2874,7 @@ dependencies = [
  "doc-ir",
  "image",
  "oar-ocr",
+ "ort",
  "thiserror",
  "tracing",
 ]
@@ -5483,6 +5484,7 @@ name = "worker"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "chrono",
  "clap",
  "db",
  "doc-ir",

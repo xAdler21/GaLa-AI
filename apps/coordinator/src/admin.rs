@@ -17,13 +17,14 @@ use uuid::Uuid;
 
 use crate::auth::{self, ClientIp};
 use crate::files;
+use crate::index_status;
 use crate::maintenance;
 use crate::public::{PLATFORM, render};
 use crate::server_update::{self, RequestError};
 use crate::state::AppState;
 use crate::templates::{
-    AuditView, ClaudeView, DashboardTemplate, LoginTemplate, MaintenanceView, ReleaseView,
-    UpdateStatusTemplate, UpdateStatusView, UserView, fmt_dt,
+    AuditView, ClaudeView, DashboardTemplate, IndexStatusTemplate, LoginTemplate, MaintenanceView,
+    ReleaseView, UpdateStatusTemplate, UpdateStatusView, UserView, fmt_dt,
 };
 
 pub const COOKIE_NAME: &str = "gala_admin";
@@ -43,6 +44,7 @@ pub fn router(state: AppState) -> Router<AppState> {
         .route("/admin/claude-access", post(set_claude_access))
         .route("/admin/update", post(start_update))
         .route("/admin/update/status", get(update_status))
+        .route("/admin/index/status", get(index_status_fragment))
         .route(
             "/admin/releases",
             post(upload_release).layer(DefaultBodyLimit::max(UPLOAD_LIMIT + 1024 * 1024)),
@@ -373,6 +375,7 @@ async fn build_dashboard(
     let releases = db::releases::list(&state.db).await?;
     let users = db::users::list(&state.db).await?;
     let audit = db::audit::recent(&state.db, 50).await?;
+    let index = index_status::load(state).await?;
     Ok(DashboardTemplate {
         username: admin.username.clone(),
         flash: flash.msg.filter(|s| !s.is_empty()),
@@ -388,6 +391,7 @@ async fn build_dashboard(
             changed_by: c.changed_by,
         },
         update: update_view(state),
+        index,
         releases: releases
             .into_iter()
             .map(|r| ReleaseView {
@@ -580,6 +584,17 @@ async fn update_status(State(state): State<AppState>, _admin: AdminSession) -> R
     render(&UpdateStatusTemplate {
         update: update_view(&state),
     })
+}
+
+/// HTMX-Fragment: Worker, Warteschlange und Dokumente des Index.
+async fn index_status_fragment(State(state): State<AppState>, _admin: AdminSession) -> Response {
+    match index_status::load(&state).await {
+        Ok(index) => render(&IndexStatusTemplate { index }),
+        Err(e) => {
+            tracing::error!(error = %e, "Index-Status: DB-Fehler");
+            (StatusCode::INTERNAL_SERVER_ERROR, "Interner Serverfehler").into_response()
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------------------------

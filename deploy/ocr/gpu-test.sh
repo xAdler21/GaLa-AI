@@ -9,7 +9,9 @@
 #   --keep    Bench-Image und Testdateien danach nicht löschen.
 #   <pfade>   Eigene PDFs/Scans statt des erzeugten Test-PDFs (z. B. echte LVs).
 #
-# Voraussetzung: das Worker-Image ist gebaut (dc.sh ocr build bzw. update.sh).
+# Voraussetzung: das Worker-Image ist da (update.sh bzw. deploy/common/images.sh).
+# Das Bench-Image kommt aus derselben Quelle: aus der Registry, oder es wird hier
+# gebaut, wenn die VM ihre Images selbst baut (GALA_IMAGE_SOURCE=build).
 # Der laufende Worker wird für die Dauer des Tests angehalten (2 GB VRAM reichen
 # nicht für zwei Prozesse) und danach wieder gestartet.
 #
@@ -40,8 +42,15 @@ require_root
 require_docker
 command -v nvidia-smi >/dev/null 2>&1 || die "nvidia-smi fehlt: NVIDIA-Treiber nicht installiert."
 
-WORKER_IMAGE=gala/worker-vision:local
-BENCH_IMAGE=gala/bench:local
+# Welche Images gelten, steht in /etc/gala/image.env (deploy/common/images.sh).
+IMAGE_REPO=gala
+IMAGE_TAG=local
+if [ -r "$GALA_ETC/image.env" ]; then
+  IMAGE_REPO=$(sed -n 's/^GALA_IMAGE_REPO=//p' "$GALA_ETC/image.env" | tail -n1)
+  IMAGE_TAG=$(sed -n 's/^GALA_IMAGE_TAG=//p' "$GALA_ETC/image.env" | tail -n1)
+fi
+WORKER_IMAGE=${IMAGE_REPO:-gala}/worker-vision:${IMAGE_TAG:-local}
+BENCH_IMAGE=${IMAGE_REPO:-gala}/bench:${IMAGE_TAG:-local}
 WORK=$(mktemp -d /var/tmp/gala-gpu-test.XXXXXX)
 WORKER_WAS_RUNNING=0
 
@@ -59,12 +68,19 @@ cleanup() {
 trap cleanup EXIT
 
 docker image inspect "$WORKER_IMAGE" >/dev/null 2>&1 \
-  || die "Worker-Image $WORKER_IMAGE fehlt. Zuerst: $GALA_REPO/deploy/common/dc.sh ocr build"
-/bin/bash "$GALA_REPO/deploy/common/disk.sh" check "${GALA_BUILD_MIN_FREE_GB:-4}"
+  || die "Worker-Image $WORKER_IMAGE fehlt. Zuerst: sudo /bin/bash $GALA_REPO/deploy/ocr/update.sh <ref>"
 
-log "Bench-Image bauen (setzt auf dem Worker-Image auf)"
-docker build -q -f "$GALA_REPO/docker/bench.Dockerfile" \
-  --build-arg "WORKER_IMAGE=$WORKER_IMAGE" -t "$BENCH_IMAGE" "$GALA_REPO" >/dev/null
+if [ "${IMAGE_REPO:-gala}" = gala ]; then
+  # Lokal gebaute Images: auch das Bench-Image hier bauen (dünne Schicht auf dem Worker-Image)
+  /bin/bash "$GALA_REPO/deploy/common/disk.sh" check "${GALA_BUILD_MIN_FREE_GB:-4}"
+  log "Bench-Image bauen (setzt auf dem Worker-Image auf)"
+  docker build -q -f "$GALA_REPO/docker/bench.Dockerfile" \
+    --build-arg "WORKER_IMAGE=$WORKER_IMAGE" -t "$BENCH_IMAGE" "$GALA_REPO" >/dev/null
+else
+  log "Bench-Image laden ($BENCH_IMAGE)"
+  docker pull -q "$BENCH_IMAGE" >/dev/null \
+    || die "Bench-Image nicht ladbar: $BENCH_IMAGE (baut die CI es für diesen Commit? siehe deploy/common/images.sh)"
+fi
 
 # Eingaben: eigene Pfade oder das erzeugte Test-PDF
 install -d -m 0755 "$WORK/in" "$WORK/out"

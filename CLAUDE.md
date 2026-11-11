@@ -11,7 +11,7 @@ Fachliche Architektur, Preis-Engine und Meilensteine stehen in [docs/ARCHITEKTUR
 - **Desktop-App** (`apps/desktop`, Tauri 2 + Leptos CSR) mit NSIS-Installer und signiertem Auto-Updater. Das ist die einzige Nutzeroberfläche. Es gibt **keine** Web-App für Endnutzer.
 - **Web-Panel** auf dem Coordinator (server-gerendert, askama + HTMX):
   - öffentliche Startseite mit Download des Installers und des CA-Zertifikats
-  - Admin-Login mit Server-Update, Wartungsmodus, Desktop-Releases und dem Schalter für den Claude-Zugang
+  - Admin-Login mit Server-Update, Wartungsmodus, Desktop-Releases, dem Schalter für den Claude-Zugang und dem Zustand des Dokumenten-Index (Worker, Warteschlange)
 
 ## VMs
 
@@ -78,10 +78,21 @@ Jede VM hat den Linux-Nutzer `claude` mit sudo (NOPASSWD). Den Schlüssel liefer
 ### Server-Update aus dem Admin-Panel
 - **Anstoßen:** Der Coordinator (läuft nicht als root) schreibt `$GALA_STATE_DIR/update-request.json`:
   `{"requested_by", "requested_at", "ref", "maintenance": bool}`.
-- **Ausführen:** `gala-update.path` (systemd) startet `gala-update.service`. Der Dienst führt `deploy/coordinator/update.sh` als root aus und löscht die Anfrage.
+- **Ausführen:** `gala-update.path` (systemd) startet `gala-update.service`. Der Dienst führt `deploy/coordinator/update.sh` als root aus und löscht die Anfrage. Das Skript lädt die Images des Commits (siehe „Images“) und wartet dabei, falls die CI sie noch baut.
 - **Status:** Das Skript schreibt `$GALA_STATE_DIR/update-status.json`:
   `{"state": "idle|running|succeeded|failed", "ref", "started_at", "finished_at", "message", "log_tail"}`.
 - **Wartungsmodus beenden:** `POST http://gala-coordinator:8081/internal/maintenance` mit Header `X-Gala-Internal-Token: $GALA_INTERNAL_TOKEN` und Body `{"enabled": false}`.
+
+### Images
+- **Bauen:** `.github/workflows/images.yml` baut bei jedem Push auf `main` `coordinator`, `worker-cpu`, `worker-vision` und `bench`, testet sie und legt sie als `ghcr.io/<besitzer>/<repo>/<name>:<commit-sha>` ab (zusätzlich Tag `main`).
+- **Bereitstellen:** `deploy/common/images.sh <coordinator|ocr> <commit-sha>` lädt die Images des Commits (oder baut lokal) und schreibt `/etc/gala/image.env` mit `GALA_IMAGE_REPO`, `GALA_IMAGE_TAG`, `GALA_BUILD_REV`. `dc.sh` reicht die Datei an compose weiter; ohne sie gelten `gala/<name>:local`.
+- **Einstellungen** in `/etc/gala/hosts.env`: `GALA_IMAGE_SOURCE` = `registry` (Standard) oder `build`, `GALA_IMAGE_REGISTRY`, `GALA_IMAGE_WAIT_MIN`.
+- `update.sh` und `install.sh` bauen nicht selbst, sondern rufen `images.sh` auf.
+
+### Worker-Status (Tabelle `worker_status`)
+- Jeder Worker schreibt alle 30 s per UPSERT über `name`: `role` (`cpu`|`vision`), `ocr_device` (`cpu`|`cuda:N`, nur vision), `build_rev`, `started_at`, `last_seen`.
+- Das Admin-Panel wertet einen Worker nach 90 s ohne Meldung als ausgefallen (`GET /admin/index/status`, HTMX-Fragment).
+- Rolle vision mit `GALA_OCR_DEVICE=cuda`: Lädt der CUDA-Provider nicht, beendet sich der Worker mit Fehler. Es gibt keinen stillen Rückfall auf die CPU.
 
 ### Umgebungsvariablen
 | Variable | Wer | Bedeutung |
@@ -97,6 +108,8 @@ Jede VM hat den Linux-Nutzer `claude` mit sudo (NOPASSWD). Den Schlüssel liefer
 | `GALA_EMBED_CACHE_DIR` | coordinator (Feature `embed`), worker (vision) | Modell-Cache für BGE-M3 |
 | `PDFIUM_DIR` | worker | Ordner mit libpdfium, falls nicht systemweit installiert |
 | `GALA_OCR_DEVICE` | worker (vision) | `cuda` (Standard) oder `cpu`. Auf gala-ocr setzt `deploy/ocr/gpu-test.sh --apply` den Wert |
+| `GALA_WORKER_NAME` | worker | Name in `index_task.worker` und `worker_status`, Standard Hostname. Die compose-Dateien setzen feste Namen |
+| `GALA_BUILD_REV` | worker | Commit des Images (setzt das Dockerfile), erscheint im Admin-Panel |
 
 ### Cargo-Features
 - `coordinator/embed`: Dokumenten-Chatbot (Frage-Embeddings per fastembed). Ohne das Feature antwortet `POST /api/v1/chat` mit 501. Im Docker-Image ist es standardmäßig an (`GALA_COORDINATOR_FEATURES`).

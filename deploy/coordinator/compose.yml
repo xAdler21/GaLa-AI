@@ -1,7 +1,8 @@
 # gala-coordinator: Postgres, Coordinator, CPU-Worker, Caddy (TLS).
 #
 # Nicht direkt aufrufen, sondern über den Wrapper (setzt die env-Dateien):
-#   /opt/gala/deploy/common/dc.sh coordinator up -d --build
+#   /opt/gala/deploy/common/dc.sh coordinator up -d
+# Die Images stellt vorher deploy/common/images.sh bereit (Registry oder lokaler Build).
 #
 # Variablen kommen aus /etc/gala/hosts.env und /etc/gala/coordinator.env.
 # Veröffentlichte Ports werden zusätzlich von gala-docker-firewall.service
@@ -43,7 +44,8 @@ services:
         # "embed" = Dokumenten-Chatbot an (lädt beim ersten Start BGE-M3, ca. 2 GB,
         # nach /srv/gala/data/models/fastembed). Leer = Chat antwortet mit 501.
         FEATURES: ${GALA_COORDINATOR_FEATURES-embed}
-    image: gala/coordinator:local
+    # Registry-Image eines Commits oder lokal gebaut: deploy/common/images.sh
+    image: ${GALA_IMAGE_REPO:-gala}/coordinator:${GALA_IMAGE_TAG:-local}
     container_name: gala-coordinator
     restart: unless-stopped
     init: true
@@ -81,7 +83,8 @@ services:
       dockerfile: docker/worker.Dockerfile
       args:
         FEATURES: ""
-    image: gala/worker-cpu:local
+        GALA_BUILD_REV: ${GALA_BUILD_REV:-}
+    image: ${GALA_IMAGE_REPO:-gala}/worker-cpu:${GALA_IMAGE_TAG:-local}
     container_name: gala-worker-cpu
     restart: unless-stopped
     init: true
@@ -92,6 +95,8 @@ services:
     environment:
       <<: *gala-env
       GALA_ARCHIV_ROOT: /mnt/archiv
+      # Fester Name für das Admin-Panel (sonst die wechselnde Container-ID)
+      GALA_WORKER_NAME: gala-coordinator-cpu
     volumes:
       - /srv/gala/data:/srv/gala/data
       - /mnt/archiv:/mnt/archiv:ro

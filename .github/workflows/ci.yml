@@ -23,6 +23,9 @@ jobs:
         run: cargo fmt --all --check
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
+      # Die GPU-Features sind im Standard-Build aus; ohne diesen Schritt bliebe ihr Code ungeprüft.
+      - name: Clippy (GPU-Features)
+        run: cargo clippy -p worker -p bench --features worker/vision,bench/cuda --all-targets -- -D warnings
       - name: Tests
         run: cargo test --workspace
       - name: Client-Crates für WASM

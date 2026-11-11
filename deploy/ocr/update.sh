@@ -38,12 +38,13 @@ main() {
   g checkout --force --detach "$commit"
   echo "[gala-ocr] jetzt auf $(g log -1 --format='%h %s' "$commit")"
 
-  # Der Build braucht Platz für Layer und Cargo-Cache; lieber vorher abbrechen
-  # als mit voller Platte mitten im Build.
+  # Neue Images brauchen Platz (lokaler Build deutlich mehr); lieber vorher
+  # abbrechen als mit voller Platte mittendrin.
   /bin/bash "$REPO/deploy/common/disk.sh" check "${GALA_BUILD_MIN_FREE_GB:-8}"
 
-  echo "[gala-ocr] docker compose build + up"
-  "$REPO/deploy/common/dc.sh" ocr build
+  echo "[gala-ocr] Image bereitstellen (Registry oder lokaler Build)"
+  /bin/bash "$REPO/deploy/common/images.sh" ocr "$commit"
+  echo "[gala-ocr] docker compose up"
   "$REPO/deploy/common/dc.sh" ocr up -d --remove-orphans
 
   # Läuft der Worker nach ein paar Sekunden noch?

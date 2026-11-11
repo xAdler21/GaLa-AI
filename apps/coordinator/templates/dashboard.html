@@ -77,6 +77,15 @@
     {% include "update_status.html" %}
   </section>
 
+  <section class="card wide" id="index">
+    <h2>Dokumenten-Index</h2>
+    <p class="muted">
+      Worker melden sich alle 30 Sekunden. „OCR-Gerät“ zeigt, worauf die Texterkennung
+      tatsächlich läuft. Die Anzeige aktualisiert sich selbst.
+    </p>
+    {% include "index_status.html" %}
+  </section>
+
   <section class="card wide" id="releases">
     <h2>Desktop-Releases</h2>
     <form method="post" action="/admin/releases" enctype="multipart/form-data" class="stack">

@@ -33,6 +33,9 @@ Ports und Firewall (identisch zu CLAUDE.md):
 | `deploy/<vm>/compose.yml`, `*.env.example` | compose-Stack und Konfigurationsvorlage je VM |
 | `deploy/<vm>/install.sh` | Einrichtung der VM (idempotent) |
 | `deploy/coordinator/update.sh` | Server-Update (siehe Abschnitt 5) |
+| `deploy/common/prepare-vm.sh [--gpu]` | frische VM vorbereiten: Docker, bei GPU-VMs Treiber 580 und Container Toolkit (Abschnitt 2.1) |
+| `deploy/common/images.sh <vm> <commit>` | Images eines Commits aus der Registry laden oder lokal bauen (Abschnitt 5.1) |
+| `.github/workflows/images.yml` | baut, testet und veröffentlicht die Images bei jedem Push auf `main` |
 | `deploy/common/dc.sh <vm> …` | `docker compose` mit den richtigen env-Dateien |
 | `deploy/common/disk.sh <check GB\|cleanup\|report>` | Plattenplatz prüfen, aufräumen, anzeigen (Abschnitt 7) |
 | `deploy/ocr/gpu-test.sh` | prüft, ob die OCR auf der GPU rechnet (Abschnitt 8.3) |
@@ -53,14 +56,19 @@ Reihenfolge: VMs vorbereiten → Bootstrap → `install.sh` je VM (coordinator z
 ### 2.1 Voraussetzungen je VM
 
 1. Ubuntu Server 24.04 oder neuer (gala-coordinator läuft auf 26.04), feste IP, Hostname passend (`gala-coordinator`, `gala-ocr`, `gala-llm`), eigener Admin-Nutzer mit sudo und SSH-Schlüssel.
-2. **CPU mit AVX/AVX2 in der VM.** Die ONNX Runtime (BGE-M3 im Coordinator mit Feature `embed`, OCR/Embeddings auf gala-ocr) stürzt sonst beim Start mit SIGILL ab (Container-Exit-Code 132). In Proxmox den CPU-Typ auf `host` (oder `x86-64-v3`) stellen; der Standardtyp (`kvm64`/„QEMU Virtual CPU“) hat kein AVX. Prüfen: `grep -cw avx2 /proc/cpuinfo`. Ohne AVX den Coordinator mit `GALA_COORDINATOR_FEATURES=` (leer) in `/etc/gala/coordinator.env` bauen.
-3. Docker Engine, compose-Plugin und buildx. Unter Ubuntu reichen die Distributionspakete: `sudo apt install docker.io docker-compose-v2 docker-buildx`.
-4. GPU-VMs: NVIDIA-Treiber und NVIDIA Container Toolkit (siehe Abschnitt 7 und 8).
-5. Repo nach `/opt/gala` klonen. Die VMs brauchen dafür Lesezugriff auf das Git-Repo (z. B. Deploy-Key mit Nur-Lese-Recht oder Token in der Remote-URL):
+2. **CPU mit AVX/AVX2 in der VM.** Die ONNX Runtime (BGE-M3 im Coordinator mit Feature `embed`, OCR/Embeddings auf gala-ocr) stürzt sonst beim Start mit SIGILL ab (Container-Exit-Code 132). In Proxmox den CPU-Typ auf `host` (oder `x86-64-v3`) stellen; der Standardtyp (`kvm64`/„QEMU Virtual CPU“) hat kein AVX. Prüfen: `grep -cw avx2 /proc/cpuinfo`. Ohne AVX den Coordinator mit `GALA_COORDINATOR_FEATURES=` (leer) in `/etc/gala/coordinator.env` selbst bauen; dazu `GALA_IMAGE_SOURCE=build` in `/etc/gala/hosts.env` (das Image aus der Registry enthält `embed`).
+3. Repo nach `/opt/gala` klonen. Die VMs brauchen dafür Lesezugriff auf das Git-Repo (z. B. Deploy-Key mit Nur-Lese-Recht oder Token in der Remote-URL):
    ```bash
+   sudo apt-get install -y git
    sudo git clone <repo-url> /opt/gala
    ```
    Der Checkout gehört root; das Update-System läuft als root.
+4. VM vorbereiten:
+   ```bash
+   sudo /bin/bash /opt/gala/deploy/common/prepare-vm.sh         # gala-coordinator
+   sudo /bin/bash /opt/gala/deploy/common/prepare-vm.sh --gpu   # gala-ocr, gala-llm
+   ```
+   Das Skript installiert Docker (Distributionspakete `docker.io`, `docker-compose-v2`, `docker-buildx`) und mit `--gpu` den NVIDIA-Treiber aus Branch 580 (proprietäres Modul, vorgebaut passend zum Kernel) sowie das NVIDIA Container Toolkit aus der Paketquelle von NVIDIA. Es warnt bei fehlendem AVX2, Secure Boot und fehlendem Passthrough. Nach der Treiber-Installation ist ein Neustart nötig; danach `nvidia-smi` prüfen (Abschnitt 8.1). Das Skript vergrößert keine Platten (Abschnitt 7).
 
 ### 2.2 Bootstrap des Nutzers `claude`
 
@@ -108,11 +116,11 @@ sudo mount /mnt/archiv && ls /mnt/archiv
 scp gala-coordinator:/etc/gala/deploy_key.pub /tmp/gala-deploy.pub   # oder per Hand kopieren
 sudo /opt/gala/deploy/ocr/install.sh --deploy-pubkey /tmp/gala-deploy.pub
 sudoedit /etc/gala/ocr.env      # POSTGRES_PASSWORD = Wert aus coordinator.env
-sudo /opt/gala/deploy/common/dc.sh ocr up -d --build
+sudo /opt/gala/deploy/ocr/install.sh                      # erneut: lädt das Image, startet den Worker
 sudo /bin/bash /opt/gala/deploy/ocr/gpu-test.sh --apply   # rechnet die GPU? setzt GALA_OCR_DEVICE
 ```
 
-Der erste Build lädt mehrere GB (Rust- und CUDA-Image, ONNX-Runtime-Paket) und belegt mit Cargo-Cache geschätzt 15 GB unter `/var/lib/docker`. Vorher Abschnitt 7 lesen (Platz auf dem Host).
+Das Worker-Image kommt fertig aus der Registry (Abschnitt 5.1) und ist mit CUDA-Laufzeit einige GB groß. Vorher Abschnitt 7 lesen (Platz auf dem Host). Bis `gpu-test.sh --apply` gelaufen ist, steht `GALA_OCR_DEVICE` auf `cuda`: lädt der CUDA-Provider nicht, startet der Worker nicht (Abschnitt 8.3).
 
 **gala-llm:**
 
@@ -159,6 +167,11 @@ Danach Anmeldung im Admin-Panel unter `https://gala-coordinator/admin`. Ohne DNS
 | Claude-Zugang | `setting.claude_access` | Nur `GET /internal/claude-access` liefert den Wert; die VMs fragen ihn ab (Abschnitt 4). |
 | Server-Update | Datei `update-request.json` | Löst `gala-update.path` aus (Abschnitt 5). |
 
+**Dokumenten-Index.** Der Abschnitt zeigt, ob die Verarbeitung läuft (aktualisiert sich alle 15 Sekunden):
+- **Worker:** Jeder Worker schreibt alle 30 Sekunden ein Lebenszeichen in die Tabelle `worker_status` (Name, Rolle, OCR-Gerät, Commit des Images). Nach 90 Sekunden ohne Meldung steht dort „keine Meldung“. „OCR-Gerät“ ist das Gerät, auf dem die Texterkennung tatsächlich läuft (`cuda:0` oder `cpu`).
+- **Warteschlange:** wartende, laufende und endgültig gescheiterte Aufgaben je Art (Text extrahieren, OCR, Embeddings).
+- **Warnung:** Warten Aufgaben, aber kein Worker der zuständigen Rolle meldet sich, steht das als Hinweis darüber (z. B. gala-ocr aus oder Worker startet nicht).
+
 Jede Änderung steht in `audit_log`. Die internen Routen (`:8081`) sind nur für die drei VMs erreichbar und werden von Caddy nie nach außen geroutet (`/internal/*` → 404). Schreibende interne Routen verlangen zusätzlich den Header `X-Gala-Internal-Token`.
 
 ## 4. Claude-Zugang im Detail
@@ -190,8 +203,8 @@ Ablauf von `update.sh`:
 
 1. Anfrage lesen (`jq`), löschen, `update-status.json` auf `running` setzen (atomar per tmp + `mv`).
 2. `git fetch` und `git checkout --detach` des Refs (Branch, Tag oder SHA) in `/opt/gala`.
-3. gala-coordinator: `docker compose build`, `up -d`, Health-Check auf `http://127.0.0.1:8080/api/v1/health`, danach CA nach `ca.crt` kopieren.
-4. gala-ocr: per SSH (`gala-deploy`, Forced Command) mit der aufgelösten Commit-SHA: fetch, checkout, build, up.
+3. gala-coordinator: Plattenplatz prüfen, Images des Commits bereitstellen (`images.sh`, Abschnitt 5.1), `up -d`, Health-Check auf `http://127.0.0.1:8080/api/v1/health`, CA nach `ca.crt` kopieren, aufräumen (`disk.sh cleanup`).
+4. gala-ocr: per SSH (`gala-deploy`, Forced Command) mit der aufgelösten Commit-SHA: fetch, checkout, Image bereitstellen, up, aufräumen.
 5. gala-llm: nur wenn sich `deploy/llm/` zwischen altem und neuem Commit geändert hat: pull, up, Health abwarten.
 6. War „Wartungsmodus“ angefordert, setzt das Skript `POST http://127.0.0.1:8081/internal/maintenance` mit `{"enabled": false}` und `X-Gala-Internal-Token`.
 7. Status `succeeded` mit Meldung und `log_tail`.
@@ -203,6 +216,33 @@ Hinweise:
 - Änderungen an den systemd-Units des Coordinators übernimmt `update.sh` automatisch. Bei Änderungen an `install.sh`-Teilen (Firewall, Mounts, ufw) das Skript einmal von Hand erneut ausführen.
 - Das Skript braucht die Executable-Bits nicht (Units und sudoers rufen `/bin/bash` auf).
 - Manuell: `sudo /opt/gala/deploy/ocr/update.sh <ref>` bzw. `…/llm/update.sh <ref>` auf der jeweiligen VM.
+
+### 5.1 Images: von GitHub Actions gebaut, auf den VMs nur geladen
+
+Die Images von Coordinator und Workern baut der Workflow `.github/workflows/images.yml` bei jedem Push auf `main` und legt sie in die GitHub-Registry:
+
+| Image | Inhalt |
+|---|---|
+| `ghcr.io/<besitzer>/<repo>/coordinator:<commit>` | Coordinator mit Feature `embed` |
+| `…/worker-cpu:<commit>` | Worker, Rolle `cpu` |
+| `…/worker-vision:<commit>` | Worker mit Feature `vision`, CUDA-12-Laufzeit |
+| `…/bench:<commit>` | Benchmark für `gpu-test.sh`, setzt auf `worker-vision` auf |
+
+Vor dem Hochladen prüft der Workflow jedes Image: das Binary startet; im Vision-Image ist der CUDA-12-Provider vollständig; das Bench-Image erkennt ein Test-PDF auf der CPU (lädt dabei die OCR-Modelle); `--device cuda` bricht ohne GPU ab. Schlägt eine Prüfung fehl, gibt es für den Commit kein Image und das Update bleibt beim alten Stand.
+
+Auf den VMs stellt `deploy/common/images.sh <vm> <commit>` die Images bereit und schreibt `/etc/gala/image.env` (welches Image gilt). `update.sh` und `install.sh` rufen es auf. Einstellungen in `/etc/gala/hosts.env`:
+
+| Variable | Bedeutung |
+|---|---|
+| `GALA_IMAGE_SOURCE` | `registry` (Standard): Images laden. `build`: die VM baut selbst aus `/opt/gala` (viel Platz und Zeit; nötig ohne Zugang zur Registry oder mit abweichenden Features, z. B. Coordinator ohne `embed`). |
+| `GALA_IMAGE_REGISTRY` | Standard `ghcr.io/<besitzer>/<repo>`, abgeleitet vom git-Remote `origin` |
+| `GALA_IMAGE_WAIT_MIN` | So lange wartet ein Update auf Images, die die CI noch baut (Standard 30). Ein Lauf dauert etwa 15 Minuten. |
+
+Ablauf einer Änderung: Commit nach `main` pushen → Workflow „Images“ läuft → im Admin-Panel „Update starten“. Wer das Update sofort nach dem Push startet, sieht im Log „Noch nicht ladbar (baut die CI noch?)“, bis die Images da sind.
+
+**Einmalig nach dem ersten Lauf:** Neue Pakete in der GitHub-Registry sind zunächst privat. Entweder jedes der vier Pakete auf GitHub öffentlich stellen (Paket → Package settings → Change visibility), oder auf jeder VM einmal als root anmelden: `sudo docker login ghcr.io` mit einem Token, das nur `read:packages` darf. Ohne das scheitert das Laden mit `denied`/`unauthorized`.
+
+Hinweis: gala-llm nutzt weiter das fertige llama.cpp-Image und ist davon nicht betroffen.
 
 ## 6. Backups
 
@@ -236,9 +276,9 @@ Plan: ca. **200–300 GB SSD** für gala-coordinator.
 | Docker-Images und Build-Cache | 10–20 GB |
 | Backups (14 Dumps) | wenige GB bis einige 10 GB |
 
-gala-ocr braucht rund **30 GB** (Betriebssystem und NVIDIA-Treiber ca. 10 GB, Docker-Images und Build-Cache ca. 15 GB, Reserve), gala-llm vor allem Platz für die Modelle (Qwen 14B Q4_K_M ca. 9 GB). Die Zahlen für gala-ocr sind geschätzt; `disk.sh report` zeigt die echte Belegung.
+gala-ocr braucht rund **25 GB** (Betriebssystem und NVIDIA-Treiber ca. 10 GB, das Worker-Image in zwei Ständen während eines Updates ca. 10 GB, Reserve), gala-llm vor allem Platz für die Modelle (Qwen 14B Q4_K_M ca. 9 GB). Die Zahlen für gala-ocr sind geschätzt; `disk.sh report` zeigt die echte Belegung. Baut eine VM ihre Images selbst (`GALA_IMAGE_SOURCE=build`), kommen Rust-Image und Cargo-Cache dazu, grob 10 GB mehr.
 
-Ein Platzcheck: `sudo /bin/bash /opt/gala/deploy/common/disk.sh report` (entspricht `df -h /var/lib/docker` und `docker system df`). Die Update-Skripte brechen vor dem Build ab, wenn weniger als 8 GB frei sind (`GALA_BUILD_MIN_FREE_GB`), und löschen danach das vorherige Image (`disk.sh cleanup`). Der Build-Cache bleibt absichtlich liegen; von Hand: `docker builder prune` (der nächste Build kompiliert dann alles neu).
+Ein Platzcheck: `sudo /bin/bash /opt/gala/deploy/common/disk.sh report` (entspricht `df -h /var/lib/docker` und `docker system df`). Die Update-Skripte brechen ab, bevor sie Images laden oder bauen, wenn weniger als 8 GB frei sind (`GALA_BUILD_MIN_FREE_GB`), und löschen danach das vorherige Image (`disk.sh cleanup`). Ein alter Build-Cache aus der Zeit lokaler Builds lässt sich von Hand löschen: `docker builder prune -a`.
 
 **Thin Provisioning auf dem Hypervisor.** Liegen die VM-Platten dünn provisioniert (Proxmox: LVM-thin, ZFS, qcow2), belegt die VM auf dem Host jeden Block, den sie je beschrieben hat. Gelöschte Dateien geben den Platz erst mit `fstrim` zurück, und nur, wenn an der VM-Platte **Discard** eingeschaltet ist (Proxmox: Hardware → Festplatte → „Discard“, dazu „SSD-Emulation“). Ohne Discard läuft der Host voll, obwohl die VMs intern noch Platz zeigen; `df` in der VM sieht das nicht. Deshalb:
 - Discard an allen VM-Platten einschalten. `disk.sh cleanup` ruft `fstrim -av` auf, Ubuntu zusätzlich wöchentlich (`fstrim.timer`).
@@ -274,7 +314,7 @@ Die GTX 950 (2 GB) ist die schwächste Stelle der Planung:
 - **ONNX Runtime und CUDA 12:** `ort` 2.0.0-rc.13 lädt beim Build eine vorgebaute ONNX Runtime 1.28.0, deren CUDA-Provider es nur für **CUDA 13** gibt (`ort-sys`: „we only ship 13 for now“). CUDA 13 kennt Maxwell nicht mehr. `docker/worker.Dockerfile` ersetzt deshalb den CUDA-Provider (`libonnxruntime_providers_cuda.so`, `…_shared.so`) durch den aus dem offiziellen Microsoft-Paket `onnxruntime-linux-x64-gpu_cuda12-1.28.0.tgz` (mit SHA-256 geprüft). Die Versionen müssen zusammenpassen: bei einem Update von `ort` die Build-Argumente `ORT_CUDA12_URL` und `ORT_CUDA12_SHA256` mitziehen.
 - **Stand 11.11.2026:** Mit dem CUDA-12-Provider lädt der Worker auf der GTX 950 (`Successfully registered CUDAExecutionProvider`, cuDNN 9.8, VRAM belegt). Ob auch die Inferenz läuft, zeigt erst `gpu-test.sh` (unten); dieser Lauf steht noch aus. Mögliches Fehlerbild: `no kernel image is available for execution on the device`.
 - **GPU-Test:** `sudo /bin/bash /opt/gala/deploy/ocr/gpu-test.sh` erkennt ein Test-PDF auf CPU und GPU, zeigt ms/Seite und den belegten Grafikspeicher und urteilt „BESTANDEN“ oder „NICHT BESTANDEN“. Mit `--apply` trägt es das Ergebnis als `GALA_OCR_DEVICE` in `/etc/gala/ocr.env` ein und startet den Worker neu. Mit eigenen Pfaden (`gpu-test.sh /mnt/archiv/…`) misst es echte Scans. Der Worker wird für den Test kurz angehalten.
-- **Fehlerbild ohne passenden Provider:** `Failed to load library …/libonnxruntime_providers_cuda.so with error: libcublasLt.so.13`, danach `Successfully registered CPUExecutionProvider`. Der Worker bricht dann **nicht** ab, sondern rechnet still auf der CPU. Im Zweifel zählt `nvidia-smi`: Steht dort bei laufendem Worker kein Prozess mit belegtem VRAM, rechnet die CPU.
+- **Kein stiller Rückfall auf die CPU:** Mit `GALA_OCR_DEVICE=cuda` prüft der Worker beim Start, ob der CUDA-Provider lädt. Wenn nicht, beendet er sich mit `CUDA-Provider für cuda:0 nicht ladbar: …` (z. B. `libcublasLt.so.13: cannot open shared object file` bei falscher CUDA-Version, oder fehlender Treiber/Passthrough). Der Container startet dann in einer Schleife neu, und im Admin-Panel fehlt der Worker bzw. steht auf „keine Meldung“. Entweder die Ursache beheben oder bewusst `GALA_OCR_DEVICE=cpu` setzen. Das tatsächlich genutzte Gerät steht im Admin-Panel unter „Dokumenten-Index“; zusätzlich zeigt `nvidia-smi` bei laufendem Worker den Prozess mit belegtem VRAM.
 - **VRAM:** 2 GB sind knapp. BGE-M3 läuft im Worker auf der CPU, die GPU gehört der OCR. Bei „out of memory“ kleinere Batches oder CPU-OCR nutzen.
 - **CPU-OCR:** In `/etc/gala/ocr.env` `GALA_OCR_DEVICE=cpu` setzen und `dc.sh ocr up -d`. Das Feature `vision` bleibt an (ohne es beendet sich `--role vision`), Image und GPU-Reservierung können bleiben. Das ist langsamer, aber ohne CUDA-Abhängigkeit.
 
@@ -287,6 +327,8 @@ Die GTX 950 (2 GB) ist die schwächste Stelle der Planung:
 | gala-ocr erreicht Postgres nicht | `nc -vz gala-coordinator 5432` von gala-ocr; `sudo iptables -S GALA-FW` auf dem Coordinator; Passwort in `ocr.env` gleich wie in `coordinator.env`? |
 | NFS-Mount hängt/fehlt | `showmount -e gala-coordinator` (ggf. mit `nfs-common`), `sudo exportfs -v` auf dem Coordinator, ufw 2049 von gala-ocr; Dateirechte: Nutzer `gala` hat auf beiden VMs UID 10001. |
 | NAS leer im Container | `mountpoint /mnt/archiv` auf dem Host; der Mount muss vor dem Container-Start bestehen (Docker wartet per Drop-in auf `mnt-archiv.mount`). Nach NAS-Ausfall Container neu starten. |
+| Update wartet lange bei „Noch nicht ladbar“ | Läuft der Workflow „Images“ für den Commit noch, oder ist er rot (GitHub → Actions)? Pakete privat und VM nicht angemeldet (Abschnitt 5.1)? Notfalls `GALA_IMAGE_SOURCE=build`. |
+| Aufgaben bleiben in der Warteschlange | Admin-Panel → Dokumenten-Index: Meldet sich ein Worker der Rolle? Auf der VM `docker logs gala-worker-vision` bzw. `gala-worker-cpu`. Bei `CUDA-Provider … nicht ladbar` siehe Abschnitt 8.3. |
 | Update bleibt auf `failed` | `update-status.json` (`log_tail`), `/var/log/gala/update.log`, `journalctl -u gala-update.service`. |
 | Update startet nicht | `systemctl status gala-update.path`; Schreibrechte des Coordinators auf `/var/lib/gala/state` (Besitzer `gala`). |
 | `claude`-Login geht nicht | Schalter im Admin-Panel an? `curl http://gala-coordinator:8081/internal/claude-access` auf der VM; `FAIL_MODE`; `journalctl -u ssh -n 50`. |

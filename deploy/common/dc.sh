@@ -22,7 +22,14 @@ for v in GALA_OCR_IP GALA_LLM_IP; do
   fi
 done
 
+# Welche Images gelten (Registry + Commit oder lokal gebaut), steht in
+# /etc/gala/image.env; die Datei schreibt deploy/common/images.sh. Fehlt sie,
+# gelten die lokal gebauten Images gala/<name>:local.
+env_files=(--env-file /etc/gala/hosts.env --env-file "/etc/gala/$role.env")
+if [ -r /etc/gala/image.env ]; then
+  env_files+=(--env-file /etc/gala/image.env)
+fi
+
 repo=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
-exec docker compose -p gala \
-  --env-file /etc/gala/hosts.env --env-file "/etc/gala/$role.env" \
+exec docker compose -p gala "${env_files[@]}" \
   -f "$repo/deploy/$role/compose.yml" "$@"

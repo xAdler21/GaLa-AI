@@ -12,6 +12,16 @@ pub enum Device {
     Cuda { device_id: i32 },
 }
 
+impl std::fmt::Display for Device {
+    /// `cpu` oder `cuda:N`, wie auf der Kommandozeile.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Device::Cpu => f.write_str("cpu"),
+            Device::Cuda { device_id } => write!(f, "cuda:{device_id}"),
+        }
+    }
+}
+
 /// Modellkombinationen für den M0-Vergleich. Die Dateinamen stehen im Modellregister von
 /// oar-ocr; mit dem Feature `auto-download` werden sie beim ersten Lauf nach `$OAR_HOME` geladen.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -110,11 +120,9 @@ impl PaddleOcr {
         let mut builder =
             OAROCRBuilder::new(path(det), path(rec), path(dict)).return_word_box(true);
         if let Device::Cuda { device_id } = device {
-            if !cfg!(feature = "cuda") {
-                return Err(OcrError::Init(
-                    "GPU angefordert, aber ohne Feature `cuda` gebaut".into(),
-                ));
-            }
+            // oar-ocr registriert den CUDA-Provider nachsichtig: lädt er nicht, rechnet die
+            // Runtime kommentarlos auf der CPU. Deshalb vorher streng prüfen.
+            probe_cuda(device_id)?;
             builder = builder.ort_session(OrtSessionConfig::new().with_execution_providers(vec![
                 OrtExecutionProvider::CUDA {
                     device_id: Some(device_id),
@@ -128,15 +136,43 @@ impl PaddleOcr {
         }
 
         let ocr = builder.build().map_err(|e| OcrError::Init(e.to_string()))?;
-        let device_name = match device {
-            Device::Cpu => "cpu".to_string(),
-            Device::Cuda { device_id } => format!("cuda:{device_id}"),
-        };
         Ok(Self {
-            name: format!("paddle/{}@{device_name}", preset.name()),
+            name: format!("paddle/{}@{device}", preset.name()),
             ocr,
         })
     }
+}
+
+/// Prüft, ob sich der CUDA-Provider der ONNX Runtime registrieren lässt (Provider-Bibliothek
+/// und ihre CUDA-Bibliotheken ladbar, Gerät vorhanden). Schlägt das fehl, gibt es einen Fehler
+/// statt eines stillen Rückfalls auf die CPU.
+///
+/// Fehler, die erst beim Rechnen auftreten (z. B. fehlende Kernel für eine alte GPU), findet
+/// diese Prüfung nicht; dafür gibt es `deploy/ocr/gpu-test.sh`.
+#[cfg(feature = "cuda")]
+fn probe_cuda(device_id: i32) -> Result<(), OcrError> {
+    let fail = |e: String| {
+        OcrError::Init(format!(
+            "CUDA-Provider für cuda:{device_id} nicht ladbar: {e} \
+             (ohne GPU weiterarbeiten: Gerät `cpu` wählen, im Worker GALA_OCR_DEVICE=cpu)"
+        ))
+    };
+    let provider = ort::ep::CUDA::default()
+        .with_device_id(device_id)
+        .build()
+        .error_on_failure();
+    ort::session::Session::builder()
+        .map_err(|e| fail(e.to_string()))?
+        .with_execution_providers([provider])
+        .map_err(|e| fail(e.to_string()))?;
+    Ok(())
+}
+
+#[cfg(not(feature = "cuda"))]
+fn probe_cuda(_device_id: i32) -> Result<(), OcrError> {
+    Err(OcrError::Init(
+        "GPU angefordert, aber ohne Feature `cuda` gebaut".into(),
+    ))
 }
 
 impl OcrEngine for PaddleOcr {

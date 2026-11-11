@@ -13,13 +13,14 @@ image.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 oar-ocr = { workspace = true, optional = true }
+ort = { workspace = true, optional = true }
 
 [features]
 default = ["paddle"]
 # PaddleOCR (PP-OCR) über oar-ocr / ONNX Runtime
 paddle = ["dep:oar-ocr"]
 # ONNX Runtime mit CUDA (Produktivserver mit RTX 3070)
-cuda = ["paddle", "oar-ocr/cuda"]
+cuda = ["paddle", "oar-ocr/cuda", "dep:ort", "ort/cuda"]
 # Registrierte Modelle beim ersten Lauf automatisch nach $OAR_HOME laden
 auto-download = ["paddle", "oar-ocr/auto-download"]
 

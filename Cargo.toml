@@ -62,6 +62,9 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 pdfium-render = "0.9"
 image = "0.25"
 oar-ocr = "0.10"
+# Gleiche Version wie oar-ocr/fastembed (dort exakt gepinnt). Nur für die Prüfung, ob der
+# CUDA-Provider lädt (crates/ocr); die Features kommen über oar-ocr.
+ort = { version = "=2.0.0-rc.13", default-features = false, features = ["std"] }
 
 # GAEB / Export
 roxmltree = "0.21"

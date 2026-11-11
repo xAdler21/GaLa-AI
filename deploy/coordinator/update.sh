@@ -5,7 +5,8 @@
 # Ablauf (Vertrag siehe CLAUDE.md, "Server-Update aus dem Admin-Panel"):
 #   1. Anfrage lesen (jq) und löschen, Status "running" schreiben
 #   2. git fetch + checkout des Refs in /opt/gala
-#   3. gala-coordinator: docker compose build + up -d, Health abwarten, CA kopieren
+#   3. gala-coordinator: Images laden (oder bauen, siehe deploy/common/images.sh),
+#      docker compose up -d, Health abwarten, CA kopieren
 #   4. gala-ocr per SSH (Nutzer gala-deploy, Forced Command) aktualisieren
 #   5. gala-llm nur, wenn sich deploy/llm geändert hat
 #   6. Wartungsmodus beenden, falls er für dieses Update angefordert wurde
@@ -138,8 +139,8 @@ main() {
   /bin/bash "$REPO/deploy/common/disk.sh" check "${GALA_BUILD_MIN_FREE_GB:-8}" \
     || fail "Zu wenig Plattenplatz für den Build (siehe log_tail)"
 
-  step "docker compose build (coordinator-VM)"
-  dc coordinator build
+  step "Images bereitstellen (Registry oder lokaler Build)"
+  /bin/bash "$REPO/deploy/common/images.sh" coordinator "$commit"
 
   step "docker compose up -d (coordinator-VM)"
   dc coordinator up -d --remove-orphans

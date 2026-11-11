@@ -9,6 +9,7 @@ mod cpu;
 #[cfg_attr(not(feature = "vision"), allow(dead_code))]
 mod embed;
 mod queue;
+mod status;
 #[cfg(feature = "vision")]
 mod vision;
 
@@ -225,8 +226,18 @@ async fn main() -> anyhow::Result<()> {
                 args.scan_interval,
                 stop.clone(),
             ));
+            let beat = status::spawn(
+                ctx.pool.clone(),
+                status::WorkerInfo {
+                    name: ctx.name.clone(),
+                    role: "cpu",
+                    ocr_device: None,
+                },
+                stop.clone(),
+            );
             queue::run(ctx, handler, args.concurrency, stop).await;
             let _ = scan.await;
+            let _ = beat.await;
         }
         Role::Vision => {
             #[cfg(feature = "vision")]
@@ -245,7 +256,19 @@ async fn main() -> anyhow::Result<()> {
                     )
                     .await?,
                 );
+                // Erst nach dem Laden melden: scheitert die OCR-Engine (z. B. CUDA nicht
+                // ladbar), erscheint der Worker im Admin-Panel gar nicht erst als aktiv.
+                let beat = status::spawn(
+                    ctx.pool.clone(),
+                    status::WorkerInfo {
+                        name: ctx.name.clone(),
+                        role: "vision",
+                        ocr_device: Some(args.ocr_device.to_string()),
+                    },
+                    stop.clone(),
+                );
                 queue::run(ctx, handler, args.concurrency, stop).await;
+                let _ = beat.await;
             }
             #[cfg(not(feature = "vision"))]
             {

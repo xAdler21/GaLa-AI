@@ -8,6 +8,7 @@ mod chatbot;
 mod config;
 mod error;
 mod files;
+mod index_status;
 mod internal;
 mod maintenance;
 mod public;

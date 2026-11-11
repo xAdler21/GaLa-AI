@@ -80,8 +80,10 @@ if [ "$START" -eq 1 ]; then
   elif ! mountpoint -q /srv/gala/data; then
     warn "/srv/gala/data ist nicht eingebunden: Stack nicht gestartet."
   else
-    log "Worker bauen und starten (erster Build dauert einige Minuten)"
-    dc ocr up -d --build
+    log "Image bereitstellen und Worker starten"
+    /bin/bash "$GALA_REPO/deploy/common/images.sh" ocr \
+      "$(git -c safe.directory="$GALA_REPO" -C "$GALA_REPO" rev-parse HEAD)"
+    dc ocr up -d
   fi
 fi
 log "gala-ocr eingerichtet. Prüfen: nvidia-smi; docker logs gala-worker-vision"

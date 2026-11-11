@@ -96,5 +96,9 @@ ENV LD_LIBRARY_PATH=/usr/local/lib/gala \
     # Datei-Store geteilt. Ohne die Angabe schreibt fastembed ins Arbeitsverzeichnis,
     # das dem Nutzer gala nicht gehört.
     GALA_EMBED_CACHE_DIR=/srv/gala/data/models/fastembed
+# Commit des Builds; der Worker meldet ihn im Admin-Panel. Erst hier gesetzt, damit
+# ein neuer Wert die Layer davor nicht ungültig macht.
+ARG GALA_BUILD_REV=""
+ENV GALA_BUILD_REV=${GALA_BUILD_REV}
 ENTRYPOINT ["/usr/local/lib/gala/worker"]
 CMD ["--role", "cpu"]
