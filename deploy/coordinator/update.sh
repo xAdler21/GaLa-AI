@@ -134,6 +134,10 @@ main() {
   fi
 
   # --- 3. gala-coordinator ------------------------------------------------------
+  step "Plattenplatz prüfen"
+  /bin/bash "$REPO/deploy/common/disk.sh" check "${GALA_BUILD_MIN_FREE_GB:-8}" \
+    || fail "Zu wenig Plattenplatz für den Build (siehe log_tail)"
+
   step "docker compose build (coordinator-VM)"
   dc coordinator build
 
@@ -153,6 +157,9 @@ main() {
 
   step "Caddy-Root-CA bereitstellen"
   GALA_DATA_DIR=/srv/gala/data "$REPO/deploy/coordinator/copy-ca.sh"
+
+  step "Aufräumen (verwaiste Images, fstrim)"
+  /bin/bash "$REPO/deploy/common/disk.sh" cleanup || true
 
   # --- 4./5. weitere VMs ----------------------------------------------------------
   ssh_update() { # <host>

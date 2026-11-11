@@ -96,6 +96,7 @@ Jede VM hat den Linux-Nutzer `claude` mit sudo (NOPASSWD). Den Schlüssel liefer
 | `GALA_LLM_URL` | coordinator, worker | Standard `http://gala-llm:8080` |
 | `GALA_EMBED_CACHE_DIR` | coordinator (Feature `embed`), worker (vision) | Modell-Cache für BGE-M3 |
 | `PDFIUM_DIR` | worker | Ordner mit libpdfium, falls nicht systemweit installiert |
+| `GALA_OCR_DEVICE` | worker (vision) | `cuda` (Standard) oder `cpu`. Auf gala-ocr setzt `deploy/ocr/gpu-test.sh --apply` den Wert |
 
 ### Cargo-Features
 - `coordinator/embed`: Dokumenten-Chatbot (Frage-Embeddings per fastembed). Ohne das Feature antwortet `POST /api/v1/chat` mit 501. Im Docker-Image ist es standardmäßig an (`GALA_COORDINATOR_FEATURES`).

@@ -38,6 +38,10 @@ main() {
   g checkout --force --detach "$commit"
   echo "[gala-ocr] jetzt auf $(g log -1 --format='%h %s' "$commit")"
 
+  # Der Build braucht Platz für Layer und Cargo-Cache; lieber vorher abbrechen
+  # als mit voller Platte mitten im Build.
+  /bin/bash "$REPO/deploy/common/disk.sh" check "${GALA_BUILD_MIN_FREE_GB:-8}"
+
   echo "[gala-ocr] docker compose build + up"
   "$REPO/deploy/common/dc.sh" ocr build
   "$REPO/deploy/common/dc.sh" ocr up -d --remove-orphans
@@ -48,6 +52,9 @@ main() {
     echo "[gala-ocr] FEHLER: worker-vision läuft nicht (docker logs gala-worker-vision)" >&2
     return 1
   fi
+
+  # Vorheriges Image löschen und freie Blöcke an den Host melden (Fehler egal)
+  /bin/bash "$REPO/deploy/common/disk.sh" cleanup || true
   echo "[gala-ocr] Update fertig."
 }
 

@@ -34,6 +34,8 @@ Ports und Firewall (identisch zu CLAUDE.md):
 | `deploy/<vm>/install.sh` | Einrichtung der VM (idempotent) |
 | `deploy/coordinator/update.sh` | Server-Update (siehe Abschnitt 5) |
 | `deploy/common/dc.sh <vm> …` | `docker compose` mit den richtigen env-Dateien |
+| `deploy/common/disk.sh <check GB\|cleanup\|report>` | Plattenplatz prüfen, aufräumen, anzeigen (Abschnitt 7) |
+| `deploy/ocr/gpu-test.sh` | prüft, ob die OCR auf der GPU rechnet (Abschnitt 8.3) |
 | `deploy/common/claude-access/` | schaltbarer SSH-Zugang für `claude` |
 
 Alles, was Compose braucht, wird über `deploy/common/dc.sh` aufgerufen, zum Beispiel:
@@ -107,7 +109,10 @@ scp gala-coordinator:/etc/gala/deploy_key.pub /tmp/gala-deploy.pub   # oder per 
 sudo /opt/gala/deploy/ocr/install.sh --deploy-pubkey /tmp/gala-deploy.pub
 sudoedit /etc/gala/ocr.env      # POSTGRES_PASSWORD = Wert aus coordinator.env
 sudo /opt/gala/deploy/common/dc.sh ocr up -d --build
+sudo /bin/bash /opt/gala/deploy/ocr/gpu-test.sh --apply   # rechnet die GPU? setzt GALA_OCR_DEVICE
 ```
+
+Der erste Build lädt mehrere GB (Rust- und CUDA-Image, ONNX-Runtime-Paket) und belegt mit Cargo-Cache geschätzt 15 GB unter `/var/lib/docker`. Vorher Abschnitt 7 lesen (Platz auf dem Host).
 
 **gala-llm:**
 
@@ -231,7 +236,14 @@ Plan: ca. **200–300 GB SSD** für gala-coordinator.
 | Docker-Images und Build-Cache | 10–20 GB |
 | Backups (14 Dumps) | wenige GB bis einige 10 GB |
 
-Ein Platzcheck: `df -h /srv/gala /var/lib/docker`, `docker system df`. Alte Build-Caches: `docker builder prune`. gala-ocr und gala-llm brauchen kaum Platz (Images, Modelle: Qwen 14B Q4_K_M ca. 9 GB, OCR-Modelle einige GB).
+gala-ocr braucht rund **30 GB** (Betriebssystem und NVIDIA-Treiber ca. 10 GB, Docker-Images und Build-Cache ca. 15 GB, Reserve), gala-llm vor allem Platz für die Modelle (Qwen 14B Q4_K_M ca. 9 GB). Die Zahlen für gala-ocr sind geschätzt; `disk.sh report` zeigt die echte Belegung.
+
+Ein Platzcheck: `sudo /bin/bash /opt/gala/deploy/common/disk.sh report` (entspricht `df -h /var/lib/docker` und `docker system df`). Die Update-Skripte brechen vor dem Build ab, wenn weniger als 8 GB frei sind (`GALA_BUILD_MIN_FREE_GB`), und löschen danach das vorherige Image (`disk.sh cleanup`). Der Build-Cache bleibt absichtlich liegen; von Hand: `docker builder prune` (der nächste Build kompiliert dann alles neu).
+
+**Thin Provisioning auf dem Hypervisor.** Liegen die VM-Platten dünn provisioniert (Proxmox: LVM-thin, ZFS, qcow2), belegt die VM auf dem Host jeden Block, den sie je beschrieben hat. Gelöschte Dateien geben den Platz erst mit `fstrim` zurück, und nur, wenn an der VM-Platte **Discard** eingeschaltet ist (Proxmox: Hardware → Festplatte → „Discard“, dazu „SSD-Emulation“). Ohne Discard läuft der Host voll, obwohl die VMs intern noch Platz zeigen; `df` in der VM sieht das nicht. Deshalb:
+- Discard an allen VM-Platten einschalten. `disk.sh cleanup` ruft `fstrim -av` auf, Ubuntu zusätzlich wöchentlich (`fstrim.timer`).
+- Die Summe der VM-Platten nicht größer wählen als der freie Platz des Hosts, oder den Füllstand des Hosts überwachen (`pvesm status`, `lvs`).
+- Eine VM-Platte oder ein LV nur vergrößern, wenn der Host den Platz wirklich hat. Am 10.11.2026 lief der Host voll, nachdem auf gala-ocr das Root-LV von 24 auf 48 GB vergrößert und mehrfach gebaut wurde.
 
 ## 8. Hardware-Hinweise und Fehlersuche
 
@@ -259,10 +271,12 @@ Ein Platzcheck: `df -h /srv/gala /var/lib/docker`, `docker system df`. Alte Buil
 Die GTX 950 (2 GB) ist die schwächste Stelle der Planung:
 
 - **CUDA-Version:** Maxwell (sm_52) wird nur bis **CUDA 12.x** unterstützt, **CUDA 13 hat Maxwell entfernt**. Auf der VM muss deshalb ein Treiberzweig installiert sein, der die GTX 950 noch unterstützt (Branch 580 oder älter; darüber wird Maxwell nicht mehr berücksichtigt), und im Container CUDA 12.x (Standard: `nvidia/cuda:12.8.1-cudnn-runtime-ubuntu24.04`, wie `docker/bench.Dockerfile`).
-- **ONNX Runtime (Stand 10.11.2026: GPU-OCR läuft nicht):** `ort` 2.0.0-rc.13 lädt beim Build eine vorgebaute ONNX Runtime 1.28, die es nur für **CUDA 13** gibt (`ort-sys`: „we only ship 13 for now“). Im CUDA-12-Container fehlt ihr `libcublasLt.so.13`, und CUDA 13 kennt Maxwell nicht mehr. Fehlerbild im Log des Workers: `Failed to load library …/libonnxruntime_providers_cuda.so with error: libcublasLt.so.13`, danach `Successfully registered CPUExecutionProvider`. Der Worker läuft dann auf der CPU weiter. GPU-OCR auf der GTX 950 braucht eine eigene ONNX-Runtime-Build gegen CUDA 12 (`ORT_LIB_LOCATION` bzw. Feature `load-dynamic` von `ort`); ob deren Kernel sm_52 enthalten, ist offen.
-- **VRAM:** 2 GB sind knapp für OCR **und** BGE-M3. Bei „out of memory“ kleinere Batches oder die Vision-Rolle ohne GPU nutzen.
+- **ONNX Runtime und CUDA 12:** `ort` 2.0.0-rc.13 lädt beim Build eine vorgebaute ONNX Runtime 1.28.0, deren CUDA-Provider es nur für **CUDA 13** gibt (`ort-sys`: „we only ship 13 for now“). CUDA 13 kennt Maxwell nicht mehr. `docker/worker.Dockerfile` ersetzt deshalb den CUDA-Provider (`libonnxruntime_providers_cuda.so`, `…_shared.so`) durch den aus dem offiziellen Microsoft-Paket `onnxruntime-linux-x64-gpu_cuda12-1.28.0.tgz` (mit SHA-256 geprüft). Die Versionen müssen zusammenpassen: bei einem Update von `ort` die Build-Argumente `ORT_CUDA12_URL` und `ORT_CUDA12_SHA256` mitziehen.
+- **Stand 11.11.2026:** Mit dem CUDA-12-Provider lädt der Worker auf der GTX 950 (`Successfully registered CUDAExecutionProvider`, cuDNN 9.8, VRAM belegt). Ob auch die Inferenz läuft, zeigt erst `gpu-test.sh` (unten); dieser Lauf steht noch aus. Mögliches Fehlerbild: `no kernel image is available for execution on the device`.
+- **GPU-Test:** `sudo /bin/bash /opt/gala/deploy/ocr/gpu-test.sh` erkennt ein Test-PDF auf CPU und GPU, zeigt ms/Seite und den belegten Grafikspeicher und urteilt „BESTANDEN“ oder „NICHT BESTANDEN“. Mit `--apply` trägt es das Ergebnis als `GALA_OCR_DEVICE` in `/etc/gala/ocr.env` ein und startet den Worker neu. Mit eigenen Pfaden (`gpu-test.sh /mnt/archiv/…`) misst es echte Scans. Der Worker wird für den Test kurz angehalten.
+- **Fehlerbild ohne passenden Provider:** `Failed to load library …/libonnxruntime_providers_cuda.so with error: libcublasLt.so.13`, danach `Successfully registered CPUExecutionProvider`. Der Worker bricht dann **nicht** ab, sondern rechnet still auf der CPU. Im Zweifel zählt `nvidia-smi`: Steht dort bei laufendem Worker kein Prozess mit belegtem VRAM, rechnet die CPU.
+- **VRAM:** 2 GB sind knapp. BGE-M3 läuft im Worker auf der CPU, die GPU gehört der OCR. Bei „out of memory“ kleinere Batches oder CPU-OCR nutzen.
 - **CPU-OCR:** In `/etc/gala/ocr.env` `GALA_OCR_DEVICE=cpu` setzen und `dc.sh ocr up -d`. Das Feature `vision` bleibt an (ohne es beendet sich `--role vision`), Image und GPU-Reservierung können bleiben. Das ist langsamer, aber ohne CUDA-Abhängigkeit.
-- **GPU-Nutzung prüfen:** `nvidia-smi` auf der VM muss bei laufendem Worker den Prozess mit belegtem VRAM zeigen. Steht dort kein Prozess, rechnet die CPU.
 
 ### 8.4 Allgemeine Checks
 
