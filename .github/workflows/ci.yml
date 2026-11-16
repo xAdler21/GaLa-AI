@@ -28,7 +28,15 @@ jobs:
       - name: Clippy (Rolle vision)
         run: cargo clippy -p worker --features worker/vision --all-targets -- -D warnings
       - name: Clippy (GPU-Features)
-        run: cargo clippy -p worker -p bench --features worker/cuda,bench/cuda --all-targets -- -D warnings
+        # Scheitert der Schritt, steht das Ende der Ausgabe als Anmerkung am Lauf
+        # (die Logs selbst sind nur angemeldet lesbar).
+        run: |
+          set -o pipefail
+          if ! cargo clippy -p worker -p bench --features worker/cuda,bench/cuda --all-targets -- -D warnings 2>&1 | tee clippy-gpu.log; then
+            tail_text=$(grep -v -E '^\s*(Compiling|Checking|Downloaded|Downloading|Finished) ' clippy-gpu.log | tail -n 15 | tr '\n' ' ' | cut -c1-1800)
+            echo "::error title=Clippy GPU-Features::frei auf /: $(df -h --output=avail / | tail -n1 | tr -d ' ') | $tail_text"
+            exit 1
+          fi
       - name: Tests
         run: cargo test --workspace
       - name: Client-Crates für WASM
