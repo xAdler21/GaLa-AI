@@ -1,11 +1,12 @@
 # LOKALE ENTWICKLUNG (eine Maschine, alles auf localhost).
 # Der Betrieb auf den drei Server-VMs liegt in deploy/ (siehe docs/BETRIEB.md).
 #
-# NVIDIA Container Toolkit ist nur für die GPU-Profile (llm, bench) erforderlich.
+# NVIDIA Container Toolkit ist nur für das Profil llm erforderlich.
 #
 #   docker compose up -d postgres                 # Datenbank auf 127.0.0.1:5432
 #   docker compose --profile llm up -d llm        # LLM-Server (belegt ~6–7 GB VRAM)
-#   docker compose --profile bench run --rm bench ocr /data --preset v5-latin --device cuda
+#   # Bench setzt auf dem Vision-Worker-Image auf (docker/bench.Dockerfile), OCR auf der CPU:
+#   docker compose --profile bench run --rm bench ocr /data --preset v5-latin
 #
 # Coordinator und Worker laufen lokal per cargo, z. B.:
 #   DATABASE_URL=postgres://gala:<passwort>@127.0.0.1:5432/gala cargo run -p coordinator
@@ -65,14 +66,7 @@ services:
     volumes:
       - ${BENCH_DATA:-./corpus/private}:/data:ro
       - ./bench-out:/out
-      - oar-models:/root/.oar
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
+      - oar-models:/var/cache/gala/oar
 
 volumes:
   pgdata:

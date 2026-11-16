@@ -31,7 +31,7 @@ use crate::queue::Ctx;
 enum Role {
     /// Scan, Textextraktion, Chunking.
     Cpu,
-    /// OCR und Embeddings (GPU).
+    /// OCR und Embeddings.
     Vision,
 }
 
@@ -62,9 +62,9 @@ struct Args {
     /// Verzeichnis mit der PDFium-Bibliothek (sonst Systembibliothek).
     #[arg(long, env = "PDFIUM_DIR")]
     pdfium_dir: Option<PathBuf>,
-    /// OCR-Gerät: cpu, cuda oder cuda:N (nur Rolle vision).
+    /// OCR-Gerät (nur Rolle vision): cpu, mit dem Feature `cuda` auch cuda oder cuda:N.
     #[cfg(feature = "vision")]
-    #[arg(long, env = "GALA_OCR_DEVICE", default_value = "cuda", value_parser = vision::parse_device)]
+    #[arg(long, env = "GALA_OCR_DEVICE", default_value = "cpu", value_parser = vision::parse_device)]
     ocr_device: ocr::Device,
     /// OCR-Modellkombination (nur Rolle vision).
     #[cfg(feature = "vision")]
@@ -165,7 +165,7 @@ async fn main() -> anyhow::Result<()> {
     if args.role == Role::Vision {
         bail!(
             "Die Rolle vision ist in diesem Build nicht enthalten. \
-             Mit `cargo build -p worker --features vision` neu bauen (benötigt ONNX Runtime/CUDA)."
+             Mit `cargo build -p worker --features vision` neu bauen."
         );
     }
 
@@ -256,7 +256,7 @@ async fn main() -> anyhow::Result<()> {
                     )
                     .await?,
                 );
-                // Erst nach dem Laden melden: scheitert die OCR-Engine (z. B. CUDA nicht
+                // Erst nach dem Laden melden: scheitert die OCR-Engine (z. B. Modelle nicht
                 // ladbar), erscheint der Worker im Admin-Panel gar nicht erst als aktiv.
                 let beat = status::spawn(
                     ctx.pool.clone(),

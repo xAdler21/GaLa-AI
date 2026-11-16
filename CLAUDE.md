@@ -18,7 +18,7 @@ Fachliche Architektur, Preis-Engine und Meilensteine stehen in [docs/ARCHITEKTUR
 | Host | GPU | Läuft dort |
 |---|---|---|
 | `gala-coordinator` | keine | Postgres 17 + pgvector, `coordinator` (axum), Caddy (TLS), `worker --role cpu`, Datei-Store `/srv/gala/data` (per NFS an gala-ocr) |
-| `gala-ocr` | GTX 950 (2 GB, Maxwell sm_52) | `worker --role vision`: OCR (oar-ocr) und Embeddings (BGE-M3) |
+| `gala-ocr` | keine | `worker --role vision`: OCR (oar-ocr) und Embeddings (BGE-M3), beides auf der CPU |
 | `gala-llm` | RTX 3070 + GTX 1070 (16 GB, Layer-Split, Treiber 580) | `llama-server` (OpenAI-kompatibel) auf `:8080` |
 
 Das Netzlaufwerk (NAS) ist auf gala-coordinator und gala-ocr read-only unter `/mnt/archiv` eingebunden.
@@ -90,9 +90,9 @@ Jede VM hat den Linux-Nutzer `claude` mit sudo (NOPASSWD). Den Schlüssel liefer
 - `update.sh` und `install.sh` bauen nicht selbst, sondern rufen `images.sh` auf.
 
 ### Worker-Status (Tabelle `worker_status`)
-- Jeder Worker schreibt alle 30 s per UPSERT über `name`: `role` (`cpu`|`vision`), `ocr_device` (`cpu`|`cuda:N`, nur vision), `build_rev`, `started_at`, `last_seen`.
+- Jeder Worker schreibt alle 30 s per UPSERT über `name`: `role` (`cpu`|`vision`), `ocr_device` (nur vision, im Betrieb `cpu`), `build_rev`, `started_at`, `last_seen`.
 - Das Admin-Panel wertet einen Worker nach 90 s ohne Meldung als ausgefallen (`GET /admin/index/status`, HTMX-Fragment).
-- Rolle vision mit `GALA_OCR_DEVICE=cuda`: Lädt der CUDA-Provider nicht, beendet sich der Worker mit Fehler. Es gibt keinen stillen Rückfall auf die CPU.
+- OCR läuft im Betrieb auf der CPU (gala-ocr hat keine Grafikkarte, die Images enthalten kein CUDA). `GALA_OCR_DEVICE=cuda` geht nur mit dem Feature `worker/cuda`; lädt der CUDA-Provider dann nicht, beendet sich der Worker mit Fehler (kein stiller Rückfall auf die CPU).
 
 ### Umgebungsvariablen
 | Variable | Wer | Bedeutung |
@@ -107,13 +107,14 @@ Jede VM hat den Linux-Nutzer `claude` mit sudo (NOPASSWD). Den Schlüssel liefer
 | `GALA_LLM_URL` | coordinator, worker | Standard `http://gala-llm:8080` |
 | `GALA_EMBED_CACHE_DIR` | coordinator (Feature `embed`), worker (vision) | Modell-Cache für BGE-M3 |
 | `PDFIUM_DIR` | worker | Ordner mit libpdfium, falls nicht systemweit installiert |
-| `GALA_OCR_DEVICE` | worker (vision) | `cuda` (Standard) oder `cpu`. Auf gala-ocr setzt `deploy/ocr/gpu-test.sh --apply` den Wert |
+| `GALA_OCR_DEVICE` | worker (vision) | `cpu` (Standard, in `deploy/ocr/compose.yml` fest gesetzt). `cuda` nur mit Feature `worker/cuda` |
 | `GALA_WORKER_NAME` | worker | Name in `index_task.worker` und `worker_status`, Standard Hostname. Die compose-Dateien setzen feste Namen |
 | `GALA_BUILD_REV` | worker | Commit des Images (setzt das Dockerfile), erscheint im Admin-Panel |
 
 ### Cargo-Features
 - `coordinator/embed`: Dokumenten-Chatbot (Frage-Embeddings per fastembed). Ohne das Feature antwortet `POST /api/v1/chat` mit 501. Im Docker-Image ist es standardmäßig an (`GALA_COORDINATOR_FEATURES`).
-- `worker/vision`: OCR (CUDA) und Embeddings für die Rolle `vision`. Ohne das Feature beendet sich `--role vision` mit einer Meldung.
+- `worker/vision`: OCR und Embeddings (CPU) für die Rolle `vision`. Ohne das Feature beendet sich `--role vision` mit einer Meldung.
+- `worker/cuda`, `bench/cuda`: OCR auf einer GPU. Im Betrieb ungenutzt, die CI prüft nur, dass es baut.
 
 ### Chat-Fehlercodes
 - `not_implemented` (501): Chatbot auf dem Server nicht aktiviert.

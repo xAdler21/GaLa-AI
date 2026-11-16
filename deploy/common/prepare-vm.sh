@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Bereitet eine frische Ubuntu-VM für GaLa-AI vor: Docker, bei GPU-VMs zusätzlich
+# Bereitet eine frische Ubuntu-VM für GaLa-AI vor: Docker, auf gala-llm zusätzlich
 # NVIDIA-Treiber (Branch 580) und NVIDIA Container Toolkit. Danach folgt das
 # install.sh der jeweiligen Rolle.
 #
@@ -7,7 +7,7 @@
 #   sudo git clone <repo-url> /opt/gala
 #   sudo /bin/bash /opt/gala/deploy/common/prepare-vm.sh [--gpu]
 #
-#   --gpu   für gala-ocr und gala-llm
+#   --gpu   nur für gala-llm (gala-coordinator und gala-ocr haben keine Grafikkarte)
 #
 # Idempotent. Vergrößert KEINE Platten oder Volumes: das entscheidet der Betreiber
 # mit Blick auf den freien Platz des Hypervisors (docs/BETRIEB.md, Speicher-Planung).
@@ -17,7 +17,7 @@ SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck source=lib.sh
 . "$SCRIPT_DIR/lib.sh"
 
-# Letzter Treiberzweig für Maxwell (GTX 950) und Pascal (GTX 1070).
+# Letzter Treiberzweig für Pascal (GTX 1070).
 NVIDIA_BRANCH=580
 GPU=0
 for arg in "$@"; do

@@ -26,9 +26,12 @@ uuid.workspace = true
 
 [features]
 default = []
-# Rolle `vision` auf der OCR-VM: Embeddings (BGE-M3) und GPU-OCR.
+# Rolle `vision` auf der OCR-VM: Embeddings (BGE-M3) und OCR, beides auf der CPU.
 # auto-download: OCR-Modelle beim ersten Start nach $OAR_HOME laden (Volume oar-models).
-vision = ["retrieval/fastembed", "dep:ocr", "ocr/cuda", "ocr/auto-download"]
+vision = ["retrieval/fastembed", "dep:ocr", "ocr/auto-download"]
+# OCR zusätzlich auf einer GPU möglich (GALA_OCR_DEVICE=cuda). Im Betrieb nicht genutzt:
+# gala-ocr hat keine Grafikkarte. Die Images bauen ohne dieses Feature.
+cuda = ["vision", "ocr/cuda"]
 
 [lints]
 workspace = true

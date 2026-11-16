@@ -29,7 +29,7 @@ Weiterführende Doku:
 | `crates/lv-model` | LV-Domänenmodell: Titel/Positionen, OZ, Einheiten, deutsche Zahlen, Review-Felder (WASM-tauglich) |
 | `crates/api-types` | Gemeinsame API- und Live-Event-Typen für Server und Desktop-App (WASM-tauglich) |
 | `crates/pdf` | PDFium-Anbindung: Textebene → Wort-Tokens, Seiten-Triage (Textebene oder OCR?), Rendern |
-| `crates/ocr` | `OcrEngine`-Trait und PaddleOCR über `oar-ocr` (CPU/CUDA) |
+| `crates/ocr` | `OcrEngine`-Trait und PaddleOCR über `oar-ocr` (CPU; CUDA nur als optionales Feature) |
 | `crates/gaeb` | GAEB DA XML 3.x lesen (X81–X86, tolerant, ISO-8859-1) und X84-Angebotsabgabe aus der Original-X83 schreiben |
 | `crates/export` | Bepreistes LV als Excel mit Formeln, Titelsummen und MwSt. |
 | `crates/db` | Postgres-Pool und Migrationen |
@@ -86,9 +86,8 @@ So misst `bench ocr` die Zeichenfehlerrate:
 - **Digitale Seiten:** Die Textebene dient automatisch als Referenz. Das ist optimistisch, weil die Seite sauber gerendert ist.
 - **Scans:** Hier braucht es Ground-Truth-Dateien neben dem PDF, `<name>.p<Seite>.txt` (Seite 1-basiert). Bei Bildern heißt die Datei `<name>.txt`.
 
-Auf der OCR-VM mit GPU:
+Auf der OCR-VM (gala-ocr, OCR auf der CPU) misst `deploy/ocr/ocr-test.sh` mit dem Bench-Image:
 
 ```bash
-docker compose --profile bench build bench
-docker compose --profile bench run --rm bench ocr /data --preset v5-latin --preset v6-small --device cuda --json /out/ocr.json
+sudo /bin/bash /opt/gala/deploy/ocr/ocr-test.sh /mnt/archiv/<ordner>
 ```

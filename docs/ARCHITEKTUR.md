@@ -85,7 +85,7 @@ Rust ist hier eine gute Wahl, allerdings aus anderen Gründen als reiner Recheng
                        └───────────┬───────────────────────────────┬──────────────────┘
                                    │ Postgres, NFS                 │ HTTP (OpenAI-API)
               ┌────────────────────▼───────────┐       ┌───────────▼──────────────────────┐
-              │ gala-ocr: GTX 950 (2 GB)       │       │ gala-llm: RTX 3070 + GTX 1070    │
+              │ gala-ocr: keine GPU (CPU)      │       │ gala-llm: RTX 3070 + GTX 1070    │
               │ worker --role vision           │──────►│ llama-server, 16 GB Layer-Split  │
               │ OCR (oar-ocr), Embeddings      │       │ 12–14B-Modell, Treiber 580       │
               └────────────────────────────────┘       └──────────────────────────────────┘
@@ -93,9 +93,9 @@ Rust ist hier eine gute Wahl, allerdings aus anderen Gründen als reiner Recheng
 ```
 
 Was sich gegenüber dem Einzelserver-Entwurf weiter unten ändert:
-- **GPU-Arbiter:** Der Phasenwechsel zwischen VISION und LLM auf einer 8-GB-Karte entfällt, weil OCR und LLM eigene GPUs haben. Der Arbiter schrumpft zu einer Ressourcen-Zuordnung: `gpu_vision`-Tasks laufen auf gala-ocr, `gpu_llm`-Aufrufe gehen per HTTP an gala-llm.
+- **GPU-Arbiter:** Der Phasenwechsel zwischen VISION und LLM auf einer 8-GB-Karte entfällt, weil die OCR auf der CPU von gala-ocr rechnet und das LLM eigene GPUs hat. Der Arbiter schrumpft zu einer Ressourcen-Zuordnung: `gpu_vision`-Tasks laufen auf gala-ocr, `gpu_llm`-Aufrufe gehen per HTTP an gala-llm.
 - **LLM:** 16 GB über zwei Karten erlauben 12–14B-Modelle statt 7–9B. Der Layer-Split braucht kaum PCIe-Bandbreite; die langsamere 1070 kostet etwas Tempo (geschätzt 20–30 Token/s).
-- **OCR-GPU:** Die GTX 950 hat nur 2 GB und Maxwell (sm_52). OCR und Embedding passen hinein. Das VLM für Handschrift (~0,9B) passt nicht; es läuft bei Bedarf auf gala-llm oder auf der CPU. Ob ONNX Runtime/CUDA die 950 noch unterstützt, klärt M0. Fallback ist CPU-OCR.
+- **OCR ohne GPU:** gala-ocr hat keine Grafikkarte (die geplante GTX 950 ist entfallen, kein Platz im Server). OCR und Embeddings rechnen auf der CPU; wie viele Seiten pro Stunde das sind, misst `deploy/ocr/ocr-test.sh`. Die GPU-Stunden-Schätzungen für den Backfill weiter unten gelten dafür nicht mehr. Das VLM für Handschrift (~0,9B) läuft bei Bedarf auf gala-llm.
 - **Clients:** Es gibt nur die Desktop-App. Das Web-Panel des Coordinators dient nur dem Download und der Administration.
 
 ## Systemarchitektur

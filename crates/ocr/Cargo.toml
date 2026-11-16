@@ -19,7 +19,7 @@ ort = { workspace = true, optional = true }
 default = ["paddle"]
 # PaddleOCR (PP-OCR) über oar-ocr / ONNX Runtime
 paddle = ["dep:oar-ocr"]
-# ONNX Runtime mit CUDA (Produktivserver mit RTX 3070)
+# ONNX Runtime mit CUDA. Im Betrieb nicht genutzt (OCR läuft auf der CPU).
 cuda = ["paddle", "oar-ocr/cuda", "dep:ort", "ort/cuda"]
 # Registrierte Modelle beim ersten Lauf automatisch nach $OAR_HOME laden
 auto-download = ["paddle", "oar-ocr/auto-download"]

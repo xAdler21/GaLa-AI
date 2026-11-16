@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Erzeugt ein Test-PDF mit Textebene (LV-artige Zeilen) für deploy/ocr/gpu-test.sh.
+"""Erzeugt ein Test-PDF mit Textebene (LV-artige Zeilen) für deploy/ocr/ocr-test.sh.
 
 Aufruf: mk-test-pdf.py <ziel.pdf>
 

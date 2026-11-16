@@ -42,17 +42,9 @@ jobs:
             build_args: >-
               FEATURES=vision
               BUILD_IMAGE=rust:1-trixie
-              RUNTIME_IMAGE=nvidia/cuda:12.8.1-cudnn-runtime-ubuntu24.04
+              RUNTIME_IMAGE=debian:trixie-slim
     steps:
       - uses: actions/checkout@v4
-
-      # Das Vision-Image (CUDA-Laufzeit, Rust-Build, ONNX-Runtime-Paket) braucht
-      # mehr Platz, als der Runner frei hat.
-      - name: Platz schaffen
-        if: matrix.name == 'worker-vision'
-        run: |
-          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android /opt/hostedtoolcache/CodeQL
-          df -h /
 
       - name: Image-Namen
         run: |
@@ -75,18 +67,15 @@ jobs:
       - name: "Test: Binary startet"
         run: docker run --rm "$IMAGE:$GITHUB_SHA" --help
 
-      # --- nur worker-vision: Bibliotheken, Bench-Image, echte OCR auf der CPU ---
+      # --- nur worker-vision: Bibliotheken, Bench-Image, echte OCR ---
 
-      - name: "Test: CUDA-12-Provider vollständig"
+      - name: "Test: keine fehlenden Bibliotheken"
         if: matrix.name == 'worker-vision'
         run: |
           docker run --rm --entrypoint sh "$IMAGE:$GITHUB_SHA" -c \
-            'ls -la /usr/local/lib/gala && ldd /usr/local/lib/gala/libonnxruntime_providers_cuda.so' | tee ldd.txt
-          # Der Provider muss gegen CUDA 12 gebaut sein (CUDA 13 kennt die GTX 950 nicht).
-          grep -q 'libcublasLt.so.12 => /' ldd.txt
-          # libcuda.so.1 und libnvidia-* kommen erst zur Laufzeit vom Treiber des Hosts.
-          if grep 'not found' ldd.txt | grep -v -e 'libcuda\.so\.1' -e 'libnvidia'; then
-            echo "Dem CUDA-Provider fehlen Bibliotheken im Image." >&2
+            'ls -la /usr/local/lib/gala && ldd /usr/local/lib/gala/worker /usr/local/lib/gala/libpdfium.so' | tee ldd.txt
+          if grep 'not found' ldd.txt; then
+            echo "Dem Worker fehlen Bibliotheken im Image." >&2
             exit 1
           fi
 
@@ -99,7 +88,7 @@ jobs:
             --label "org.opencontainers.image.revision=${GITHUB_SHA}" \
             -t "$REPO/bench:$GITHUB_SHA" -t "$REPO/bench:main" .
 
-      - name: "Test: OCR auf der CPU (Modelle laden, Test-PDF erkennen)"
+      - name: "Test: OCR (Modelle laden, Test-PDF erkennen)"
         if: matrix.name == 'worker-vision'
         run: |
           mkdir -p "$RUNNER_TEMP/in"
@@ -112,21 +101,6 @@ jobs:
           tokens=$(sed -n 's/.* \([0-9][0-9]*\) Tokens .*/\1/p' ocr.log | sort -n | head -n1)
           echo "wenigste Tokens je Seite: ${tokens:-keine}"
           [ "${tokens:-0}" -ge 100 ]
-
-      - name: "Test: ohne GPU bricht --device cuda ab statt still auf der CPU zu rechnen"
-        if: matrix.name == 'worker-vision'
-        run: |
-          set +e
-          docker run --rm -v "$RUNNER_TEMP/in:/in:ro" "$REPO/bench:$GITHUB_SHA" \
-            ocr /in --device cuda --max-pages 1 >cuda.log 2>&1
-          rc=$?
-          set -e
-          tail -n 5 cuda.log
-          if [ "$rc" -eq 0 ]; then
-            echo "bench lief ohne GPU mit --device cuda durch (stiller CPU-Rückfall)." >&2
-            exit 1
-          fi
-          grep -q 'CUDA-Provider' cuda.log
 
       # --- Veröffentlichen ---
 

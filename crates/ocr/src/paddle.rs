@@ -148,7 +148,7 @@ impl PaddleOcr {
 /// statt eines stillen Rückfalls auf die CPU.
 ///
 /// Fehler, die erst beim Rechnen auftreten (z. B. fehlende Kernel für eine alte GPU), findet
-/// diese Prüfung nicht; dafür gibt es `deploy/ocr/gpu-test.sh`.
+/// diese Prüfung nicht.
 #[cfg(feature = "cuda")]
 fn probe_cuda(device_id: i32) -> Result<(), OcrError> {
     let fail = |e: String| {

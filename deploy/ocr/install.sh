@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Einrichtung von gala-ocr (Ubuntu Server 24.04, Docker, NVIDIA-Treiber und
-# NVIDIA Container Toolkit bereits installiert).
+# Einrichtung von gala-ocr (Ubuntu Server, Docker bereits installiert:
+# deploy/common/prepare-vm.sh). Die VM braucht keine Grafikkarte.
 #   sudo /opt/gala/deploy/ocr/install.sh [--deploy-pubkey <datei>] [--no-start]
 #
 # --deploy-pubkey: öffentlicher Schlüssel von gala-coordinator
@@ -30,12 +30,6 @@ done
 require_root
 load_hosts
 require_docker
-
-command -v nvidia-smi >/dev/null 2>&1 \
-  || warn "nvidia-smi fehlt: NVIDIA-Treiber nicht installiert (siehe docs/BETRIEB.md)."
-docker_info=$(docker info 2>/dev/null || true)
-grep -qi nvidia <<<"$docker_info" \
-  || warn "Docker kennt keine NVIDIA-Runtime (NVIDIA Container Toolkit: nvidia-ctk runtime configure --runtime=docker)."
 
 log "Pakete installieren"
 apt_install jq curl git openssl nfs-common cifs-utils ufw
@@ -86,4 +80,4 @@ if [ "$START" -eq 1 ]; then
     dc ocr up -d
   fi
 fi
-log "gala-ocr eingerichtet. Prüfen: nvidia-smi; docker logs gala-worker-vision"
+log "gala-ocr eingerichtet. Prüfen: docker logs gala-worker-vision; deploy/ocr/ocr-test.sh"

@@ -20,7 +20,7 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 
 [features]
-# OCR auf der GPU (Linux-Server mit CUDA 12 + cuDNN 9)
+# OCR auf einer GPU (--device cuda). Im Betrieb nicht genutzt, das Bench-Image baut ohne.
 cuda = ["ocr/cuda"]
 
 [lints]
