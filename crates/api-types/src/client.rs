@@ -6,6 +6,7 @@
 //! `ApiError { code: "maintenance", .. }`.
 
 use chrono::{DateTime, Utc};
+use lv_model::{Decimal, Lv, Oz};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -90,9 +91,102 @@ pub struct ChatSource {
     pub score: f32,
 }
 
+/// Eintrag in `GET /api/v1/lvs`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LvSummary {
+    pub id: Uuid,
+    pub name: String,
+    /// Quellformat, z. B. `X83` oder `D83`.
+    pub format: String,
+    pub file_name: String,
+    pub positions: u32,
+    /// Positionen mit Einheitspreis.
+    pub priced: u32,
+    /// Angebotssumme netto.
+    pub total: Decimal,
+    /// Für `PUT /lvs/{id}/prices`: Speichern nur mit dieser Revision.
+    pub revision: i32,
+    pub created_by: Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+/// `POST /api/v1/lvs` – LV-Datei importieren (GAEB X8x/D8x).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LvImportRequest {
+    pub file_name: String,
+    /// Dateiinhalt, Base64 (Standard-Alphabet mit Padding).
+    pub data_base64: String,
+}
+
+/// `GET /api/v1/lvs/{id}`, auch Antwort auf Import und Speichern.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LvDetail {
+    pub summary: LvSummary,
+    pub lv: Lv,
+    /// Hinweise des Imports, z. B. ignorierte Satzarten.
+    pub warnings: Vec<String>,
+    /// Mögliche Exporte für dieses LV.
+    pub exports: Vec<ExportFormat>,
+}
+
+/// `PUT /api/v1/lvs/{id}/prices` – Einheitspreise setzen; GP = Menge × EP rechnet der Server.
+/// Bei veralteter `revision` antwortet er mit 409 (`conflict`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PriceUpdateRequest {
+    pub revision: i32,
+    pub prices: Vec<PriceEntry>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PriceEntry {
+    pub oz: Oz,
+    /// `None` löscht den Preis.
+    pub ep: Option<Decimal>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ExportFormat {
+    /// GAEB DA XML Angebotsabgabe (aus X83).
+    X84,
+    /// GAEB 90 Angebotsabgabe (aus D83).
+    D84,
+    Xlsx,
+}
+
+impl ExportFormat {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ExportFormat::X84 => "x84",
+            ExportFormat::D84 => "d84",
+            ExportFormat::Xlsx => "xlsx",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<ExportFormat> {
+        match s {
+            "x84" => Some(ExportFormat::X84),
+            "d84" => Some(ExportFormat::D84),
+            "xlsx" => Some(ExportFormat::Xlsx),
+            _ => None,
+        }
+    }
+}
+
+/// `GET /api/v1/lvs/{id}/export/{format}` (`x84`, `d84`, `xlsx`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LvExport {
+    pub file_name: String,
+    pub data_base64: String,
+    /// OZ der Positionen ohne Preis (in X84/D84 ohne Preis bzw. ohne Preissatz).
+    pub missing_prices: Vec<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ApiError {
-    /// Maschinenlesbar, z. B. `unauthorized`, `maintenance`, `not_found`, `not_implemented`.
+    /// Maschinenlesbar, z. B. `unauthorized`, `maintenance`, `not_found`, `not_implemented`,
+    /// `conflict`.
     pub code: String,
     pub message: String,
 }

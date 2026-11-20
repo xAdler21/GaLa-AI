@@ -10,6 +10,7 @@ mod error;
 mod files;
 mod index_status;
 mod internal;
+mod lvs;
 mod maintenance;
 mod public;
 mod server_update;

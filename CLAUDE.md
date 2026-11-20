@@ -45,6 +45,9 @@ Die DTOs stehen in `crates/api-types/src/client.rs` und sind die einzige Quelle 
   - `POST /auth/login`, `POST /auth/logout`
   - `GET /me`
   - `POST /chat`
+  - `GET /lvs`, `POST /lvs` (Import, Datei als Base64), `GET /lvs/{id}`, `DELETE /lvs/{id}`
+  - `PUT /lvs/{id}/prices` (EP setzen, mit `revision`; veraltet → 409 `conflict`)
+  - `GET /lvs/{id}/export/{x84|d84|xlsx}` (JSON mit Base64; X84 nur aus X8x, D84 nur aus D8x)
   - `GET /updates/{target}/{arch}/{current_version}`
 - **Auth:** `Authorization: Bearer <token>`. In der DB liegt nur der SHA-256-Hash des Tokens.
 - **Wartungsmodus:** Alles außer `health`, `auth/*` und `updates/*` antwortet mit 503 und `ApiError { code: "maintenance" }`.
@@ -64,6 +67,7 @@ Die DTOs stehen in `crates/api-types/src/client.rs` und sind die einzige Quelle 
 ### Einstellungen (Tabelle `setting`, Key → jsonb)
 - `maintenance` = `{"enabled": bool, "message": string|null, "since": rfc3339|null}`
 - `claude_access` = `{"enabled": bool, "changed_at": rfc3339|null, "changed_by": string|null}`. Standard ist `false`.
+- `bidder_name` = string: Bieter in Satz 04 der D84. Fehlt er, bleibt der Satz 04 der D83 stehen.
 
 Jede Änderung landet in `audit_log`.
 
@@ -119,6 +123,11 @@ Jede VM hat den Linux-Nutzer `claude` mit sudo (NOPASSWD). Den Schlüssel liefer
 ### Chat-Fehlercodes
 - `not_implemented` (501): Chatbot auf dem Server nicht aktiviert.
 - `llm_unavailable` (503): llama-server nicht erreichbar.
+
+### LV-Fehlercodes
+- `invalid_file` (422): Import-Datei ist keine lesbare GAEB-Datei.
+- `export_failed` (422): Abgabe ließ sich aus dem Original nicht erzeugen.
+- `conflict` (409): Das LV wurde seit dem Laden von jemand anderem gespeichert.
 
 ### Migrationen
 `crates/db/migrations/`, Nummernkreise siehe `crates/db/src/lib.rs`.

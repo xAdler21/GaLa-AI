@@ -1,4 +1,5 @@
-//! Desktop-API unter `/api/v1` (DTOs: `api_types::client`).
+//! Desktop-API unter `/api/v1` (DTOs: `api_types::client`). Die Angebots-Routen (`/lvs`)
+//! stehen in `lvs.rs`.
 
 use api_types::client::{
     ChatRequest, ChatResponse, HealthResponse, LoginRequest, LoginResponse, MaintenanceInfo, Role,
@@ -33,6 +34,7 @@ pub fn router(state: AppState) -> Router<AppState> {
             "/api/v1/updates/{target}/{arch}/{current_version}",
             get(update_check),
         )
+        .merge(crate::lvs::router())
         .layer(middleware::from_fn_with_state(
             state,
             maintenance::middleware,
