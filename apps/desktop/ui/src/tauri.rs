@@ -1,7 +1,10 @@
 //! Typisierte Huelle um `window.__TAURI__` (`withGlobalTauri: true`).
 //! Die Namen und Signaturen entsprechen den Commands in `src-tauri/src/main.rs`.
 
-use api_types::client::{ApiError, ChatRequest, ChatResponse, ChatTurn, HealthResponse, UserInfo};
+use api_types::client::{
+    ApiError, ChatRequest, ChatResponse, ChatTurn, HealthResponse, LvDetail, LvSummary, PriceEntry,
+    UserInfo,
+};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use wasm_bindgen::prelude::*;
 
@@ -160,4 +163,79 @@ struct OptUrlArg<'a> {
 /// Uebernimmt das CA-Zertifikat des Servers (`None`: gespeicherte Adresse).
 pub async fn install_server_ca(url: Option<&str>) -> Res<()> {
     call("install_server_ca", &OptUrlArg { url }).await
+}
+
+// --- Angebote ------------------------------------------------------------------------------
+
+/// Spiegel von `SavedExport` im Rust-Teil.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub struct SavedExport {
+    pub path: String,
+    pub missing_prices: Vec<String>,
+}
+
+#[derive(Serialize)]
+struct IdArg<'a> {
+    id: &'a str,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ImportArgs<'a> {
+    file_name: &'a str,
+    data: &'a [u8],
+}
+
+#[derive(Serialize)]
+struct PricesArgs<'a> {
+    id: &'a str,
+    revision: i32,
+    prices: &'a [PriceEntry],
+}
+
+#[derive(Serialize)]
+struct ExportArgs<'a> {
+    id: &'a str,
+    format: &'a str,
+}
+
+#[derive(Serialize)]
+struct PathArg<'a> {
+    path: &'a str,
+}
+
+pub async fn lv_list() -> Res<Vec<LvSummary>> {
+    call("lv_list", &NoArgs {}).await
+}
+
+pub async fn lv_import(file_name: &str, data: &[u8]) -> Res<LvDetail> {
+    call("lv_import", &ImportArgs { file_name, data }).await
+}
+
+pub async fn lv_get(id: &str) -> Res<LvDetail> {
+    call("lv_get", &IdArg { id }).await
+}
+
+pub async fn lv_set_prices(id: &str, revision: i32, prices: &[PriceEntry]) -> Res<LvDetail> {
+    call(
+        "lv_set_prices",
+        &PricesArgs {
+            id,
+            revision,
+            prices,
+        },
+    )
+    .await
+}
+
+pub async fn lv_delete(id: &str) -> Res<()> {
+    call("lv_delete", &IdArg { id }).await
+}
+
+pub async fn lv_export(id: &str, format: &str) -> Res<SavedExport> {
+    call("lv_export", &ExportArgs { id, format }).await
+}
+
+pub async fn show_in_folder(path: &str) -> Res<()> {
+    call("show_in_folder", &PathArg { path }).await
 }

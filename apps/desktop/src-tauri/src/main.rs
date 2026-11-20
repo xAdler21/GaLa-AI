@@ -3,6 +3,7 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod lvs;
 mod net;
 mod updates;
 
@@ -141,6 +142,13 @@ fn main() {
             logout,
             me,
             chat,
+            lvs::lv_list,
+            lvs::lv_import,
+            lvs::lv_get,
+            lvs::lv_set_prices,
+            lvs::lv_delete,
+            lvs::lv_export,
+            lvs::show_in_folder,
             updates::check_update,
             updates::install_update,
         ])

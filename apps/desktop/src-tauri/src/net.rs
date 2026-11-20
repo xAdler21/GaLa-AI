@@ -145,6 +145,15 @@ pub async fn install_server_ca(base: &str) -> CmdResult<()> {
 
 async fn parse<T: DeserializeOwned>(resp: Response) -> CmdResult<T> {
     let status = resp.status();
+    if status == StatusCode::NO_CONTENT {
+        // Ohne Inhalt (z. B. DELETE): passt auf `()` und `Option<_>`.
+        return serde_json::from_str("null").map_err(|e| {
+            err(
+                "bad_response",
+                format!("Unerwartete Antwort vom Server: {e}"),
+            )
+        });
+    }
     if status.is_success() {
         return resp.json::<T>().await.map_err(|e| {
             err(

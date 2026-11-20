@@ -161,3 +161,47 @@ p { margin: 0 0 .75rem; }
 .composer { border-top: 1px solid var(--border); padding: .9rem 2rem 1.1rem; background: var(--bg); }
 .composer .inner { max-width: 860px; margin: 0 auto; display: flex; gap: .6rem; align-items: flex-end; }
 .composer textarea { flex: 1; resize: none; min-height: 46px; max-height: 160px; }
+
+/* Angebote */
+.hidden { display: none; }
+.spinner.sm { width: 14px; height: 14px; border-width: 2px; }
+label.btn { display: inline-flex; align-items: center; cursor: pointer; }
+label.btn.disabled { opacity: .55; cursor: default; pointer-events: none; }
+.page-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; margin-bottom: .5rem; }
+.empty.small-top { margin-top: 3rem; }
+button.link { background: none; border: 0; padding: 0; color: var(--accent); cursor: pointer; font-size: .9rem; margin-bottom: .3rem; }
+button.link:hover { text-decoration: underline; }
+.totals { text-align: right; }
+.totals .sum { font-size: 1.5rem; font-weight: 600; }
+.toolbar { margin: .25rem 0 1rem; }
+.check { display: inline-flex; align-items: center; gap: .3rem; font-size: .92rem; margin-left: .5rem; }
+.warn-line { color: var(--warn); margin-top: .4rem; }
+details.msg summary { cursor: pointer; }
+details.msg ul { margin: .4rem 0 0; padding-left: 1.2rem; }
+
+table.list, table.lv { width: 100%; border-collapse: collapse; background: var(--surface); box-shadow: var(--shadow); }
+table.list th, table.lv th { text-align: left; font-weight: 600; font-size: .85rem; color: var(--muted); background: var(--surface-2); padding: .5rem .6rem; position: sticky; top: 0; z-index: 1; }
+table.list td, table.lv td { padding: .45rem .6rem; border-top: 1px solid var(--border); vertical-align: top; }
+th.num, td.num { text-align: right; white-space: nowrap; }
+td.ok { color: var(--ok); font-weight: 600; }
+table.list td.muted { overflow-wrap: anywhere; }
+tr.click { cursor: pointer; }
+tr.click:hover td { background: var(--surface-2); }
+td.actions { white-space: nowrap; text-align: right; }
+td.actions .btn { padding: .25rem .6rem; font-size: .85rem; }
+
+table.lv tr.title td { background: color-mix(in srgb, var(--accent) 9%, var(--surface)); font-weight: 600; }
+table.lv tr.title.d1 td { background: color-mix(in srgb, var(--accent) 5%, var(--surface)); }
+table.lv tr.title.d2 td, table.lv tr.title.d3 td { background: var(--surface); font-style: italic; }
+table.lv td.oz { white-space: nowrap; font-variant-numeric: tabular-nums; color: var(--muted); }
+table.lv td.text { width: 60%; }
+table.lv td.text.click { cursor: pointer; }
+table.lv td.text.click:hover { color: var(--accent); }
+table.lv .long { white-space: pre-wrap; color: var(--muted); font-size: .88rem; margin-top: .4rem; cursor: text; }
+table.lv td.num { font-variant-numeric: tabular-nums; }
+table.lv td.gp.muted { color: var(--muted); }
+.badge { display: inline-block; font-size: .72rem; padding: .05rem .4rem; border-radius: 6px; background: var(--warn-bg); color: var(--warn); vertical-align: 1px; }
+input.ep { width: 7.5rem; text-align: right; padding: .3rem .45rem; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); font-variant-numeric: tabular-nums; }
+input.ep:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent); }
+input.ep.err { border-color: var(--danger); background: var(--danger-bg); }
+tr.pos.priced input.ep { background: var(--surface); }

@@ -1213,6 +1213,7 @@ name = "gala-ai-desktop"
 version = "0.1.2"
 dependencies = [
  "api-types",
+ "base64 0.22.1",
  "gethostname",
  "reqwest",
  "serde",
@@ -4930,6 +4931,7 @@ dependencies = [
  "gloo-timers",
  "js-sys",
  "leptos",
+ "lv-model",
  "semver",
  "serde",
  "serde-wasm-bindgen",

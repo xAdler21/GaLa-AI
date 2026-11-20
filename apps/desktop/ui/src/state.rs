@@ -64,6 +64,8 @@ pub struct Ctx {
     pub fatal: RwSignal<ApiError>,
     pub update: RwSignal<UpdateState>,
     pub chat: RwSignal<Vec<ChatEntry>>,
+    /// Geöffnetes LV auf der Seite „Angebote“ (bleibt beim Seitenwechsel erhalten).
+    pub offer: RwSignal<Option<String>>,
 }
 
 impl Ctx {
@@ -83,6 +85,7 @@ impl Ctx {
             }),
             update: RwSignal::new(UpdateState::Idle),
             chat: RwSignal::new(Vec::new()),
+            offer: RwSignal::new(None),
         }
     }
 

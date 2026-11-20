@@ -1,6 +1,7 @@
 //! GaLa-AI Desktop-Oberflaeche (Leptos CSR). Haengt die App ein und waehlt die Ansicht je nach Zustand.
 
 mod chat;
+mod offers;
 mod screens;
 mod shell;
 mod state;

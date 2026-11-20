@@ -4,6 +4,7 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 
 use crate::chat::ChatPage;
+use crate::offers::OffersPage;
 use crate::state::{Ctx, Page, Screen, UpdateState};
 use crate::tauri;
 use crate::updates::UpdatePanel;
@@ -51,16 +52,6 @@ pub fn Shell() -> impl IntoView {
                     Page::Settings => view! { <SettingsPage/> }.into_any(),
                 }}
             </main>
-        </div>
-    }
-}
-
-#[component]
-fn OffersPage() -> impl IntoView {
-    view! {
-        <div class="page">
-            <h1>"Angebote"</h1>
-            <p class="muted">"Die Angebotserstellung kommt mit M1."</p>
         </div>
     }
 }
