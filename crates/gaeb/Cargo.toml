@@ -1,6 +1,6 @@
 [package]
 name = "gaeb"
-description = "GAEB DA XML 3.x lesen (X81–X86) und Angebotsabgabe X84 schreiben"
+description = "GAEB DA XML 3.x und GAEB 90 lesen, Angebotsabgabe X84/D84 schreiben"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

@@ -256,7 +256,10 @@ impl Reader {
         let (art, grund_oz) = if alternative {
             let base = child_text(item, "ALNGroupNo").and_then(|g| self.aln_base.get(g).cloned());
             (PositionsArt::Alternativ, base)
-        } else if child(item, "Provis").is_some() {
+        } else if child(item, "Provis").is_some() && child_text(item, "Provis") != Some("WithTotal")
+        {
+            // shortcut: Bedarfsposition „mit GB“ (WithTotal) geht in die Summe ein und wird
+            // deshalb als normale Position geführt; eigene Art erst, wenn die UI sie braucht.
             (PositionsArt::Bedarf, None)
         } else if child_text(item, "HourIt").is_some_and(is_yes) {
             (PositionsArt::Stundenlohn, None)

@@ -1,4 +1,5 @@
-//! GAEB DA XML 3.x: Leistungsverzeichnisse lesen (X81–X86) und die Angebotsabgabe X84 schreiben.
+//! GAEB DA XML 3.x und GAEB 90: Leistungsverzeichnisse lesen (X81–X86, D81–D86) und die
+//! Angebotsabgabe X84 bzw. D84 schreiben.
 //!
 //! Der Reader ist bewusst tolerant (Namespaces und Versionen 3.1–3.3 werden ignoriert, unbekannte
 //! Elemente übersprungen), weil echte Dateien aus AVA-Programmen selten schemakonform sind.
@@ -6,12 +7,15 @@
 //! ein und stellt Phase und Namespace um. IDs, Texte und Struktur bleiben unangetastet, damit
 //! Vergabeplattformen das Angebot der Ausschreibung zuordnen können.
 
+mod d84;
+mod d90;
 mod decode;
 mod phase;
 mod read;
 mod text;
 mod x84;
 
+pub use d84::{D84Export, write_d84};
 pub use decode::decode;
 pub use phase::Phase;
 pub use read::GaebImport;
@@ -32,7 +36,13 @@ pub enum GaebError {
 }
 
 /// Liest eine GAEB-Datei aus Rohbytes (Kodierung laut BOM bzw. XML-Deklaration).
+///
+/// Erkennt GAEB 90 (D81–D86, Festformat) am Inhalt und liest es ebenfalls; die Dateiendung
+/// spielt keine Rolle.
 pub fn import(bytes: &[u8]) -> Result<GaebImport, GaebError> {
+    if d90::looks_like_d90(bytes) {
+        return d90::read_d90(bytes);
+    }
     read::read(&decode(bytes)?).map(|(import, _)| import)
 }
 
