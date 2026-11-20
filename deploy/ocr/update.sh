@@ -32,8 +32,9 @@ main() {
   echo "[gala-ocr] git fetch"
   g fetch --tags --prune --force origin
   local commit
-  commit=$(g rev-parse --verify --quiet "${ref}^{commit}" \
-    || g rev-parse --verify --quiet "origin/${ref}^{commit}") \
+  # Zuerst origin/<ref>: ein veralteter lokaler Branch gleichen Namens darf nicht gewinnen.
+  commit=$(g rev-parse --verify --quiet "origin/${ref}^{commit}" \
+    || g rev-parse --verify --quiet "${ref}^{commit}") \
     || { echo "Ref/Commit nicht gefunden: $ref" >&2; return 1; }
   g checkout --force --detach "$commit"
   echo "[gala-ocr] jetzt auf $(g log -1 --format='%h %s' "$commit")"

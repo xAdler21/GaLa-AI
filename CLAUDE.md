@@ -114,7 +114,7 @@ Jede VM hat den Linux-Nutzer `claude` mit sudo (NOPASSWD). Den Schlüssel liefer
 ### Cargo-Features
 - `coordinator/embed`: Dokumenten-Chatbot (Frage-Embeddings per fastembed). Ohne das Feature antwortet `POST /api/v1/chat` mit 501. Im Docker-Image ist es standardmäßig an (`GALA_COORDINATOR_FEATURES`).
 - `worker/vision`: OCR und Embeddings (CPU) für die Rolle `vision`. Ohne das Feature beendet sich `--role vision` mit einer Meldung.
-- `worker/cuda`, `bench/cuda`: OCR auf einer GPU. Im Betrieb ungenutzt, die CI prüft nur, dass es baut.
+- `worker/cuda`, `bench/cuda`: OCR auf einer GPU. Im Betrieb ungenutzt und nicht in der CI (das Build-Skript von ort-sys rc.13 bricht damit unter Linux ab).
 
 ### Chat-Fehlercodes
 - `not_implemented` (501): Chatbot auf dem Server nicht aktiviert.
