@@ -2137,6 +2137,7 @@ dependencies = [
  "chrono",
  "doc-ir",
  "encoding_rs",
+ "fax",
  "gaeb",
  "image",
  "lv-model",
