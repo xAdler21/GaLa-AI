@@ -210,7 +210,7 @@ pub fn extract_text(path: &Path) -> Result<Vec<PageText>, IngestError> {
     }])
 }
 
-fn read_bytes(path: &Path) -> Result<Vec<u8>, IngestError> {
+pub(crate) fn read_bytes(path: &Path) -> Result<Vec<u8>, IngestError> {
     std::fs::read(path).map_err(|source| IngestError::Io {
         path: path.to_path_buf(),
         source,

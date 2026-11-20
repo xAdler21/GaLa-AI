@@ -98,6 +98,18 @@ impl CpuHandler {
                 store::set_pages(&self.pool, id, page_count).await?;
                 (text_pages, ocr_pages)
             }
+            DocKind::Tiff => {
+                let p = path.clone();
+                let n = tokio::task::spawn_blocking(move || {
+                    ingest::tiff::tiff_page_count(&p).map_err(|e| error_chain(&e))
+                })
+                .await
+                .context("Extraktions-Thread abgestürzt")?
+                .map_err(|m| anyhow!("{}: {m}", info.rel_path))?;
+                store::set_pages(&self.pool, id, n).await?;
+                // Kein Text vorhanden: jede Seite geht an die OCR.
+                (Vec::new(), (1..=n).collect())
+            }
             kind => {
                 let p = path.clone();
                 let pages = tokio::task::spawn_blocking(move || {

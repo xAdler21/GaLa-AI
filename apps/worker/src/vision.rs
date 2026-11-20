@@ -97,23 +97,32 @@ impl VisionHandler {
         let Some(info) = store::document_info(&self.pool, id).await? else {
             return Ok(());
         };
-        if info.kind != DocKind::Pdf {
-            return Err(anyhow!(
-                "OCR nur für PDF möglich, nicht für {}",
-                info.kind.as_str()
-            ));
-        }
         let path = self.archive_root.join(&info.rel_path);
         let index = page.saturating_sub(1);
 
-        let image = self
-            .pdf
-            .call(move |engine| {
-                let doc = engine.open(&path).map_err(|e| error_chain(&e))?;
-                doc.render(index, OCR_DPI).map_err(|e| error_chain(&e))
+        let image = match info.kind {
+            DocKind::Pdf => {
+                self.pdf
+                    .call(move |engine| {
+                        let doc = engine.open(&path).map_err(|e| error_chain(&e))?;
+                        doc.render(index, OCR_DPI).map_err(|e| error_chain(&e))
+                    })
+                    .await?
+            }
+            // Scans haben ihre eigene Auflösung; OCR_DPI rechnet nur Koordinaten um.
+            DocKind::Tiff => tokio::task::spawn_blocking(move || {
+                ingest::tiff::tiff_page(&path, index).map_err(|e| error_chain(&e))
             })
-            .await?
-            .map_err(|m| anyhow!("Seite {page} nicht renderbar: {m}"))?;
+            .await
+            .context("TIFF-Thread abgestürzt")?,
+            kind => {
+                return Err(anyhow!(
+                    "OCR nur für PDF und TIFF möglich, nicht für {}",
+                    kind.as_str()
+                ));
+            }
+        }
+        .map_err(|m| anyhow!("Seite {page} nicht lesbar: {m}"))?;
 
         let pages: Vec<Page> = self
             .ocr

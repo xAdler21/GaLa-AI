@@ -13,6 +13,7 @@ pub mod chunk;
 pub mod extract;
 pub mod scan;
 pub mod store;
+pub mod tiff;
 
 pub use chunk::{Chunk, ChunkConfig, PageText, chunk_pages, chunk_text};
 pub use scan::{DocKind, ScannedFile, detect_kind, diff, scan_dir, sha256_file};

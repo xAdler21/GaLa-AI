@@ -19,6 +19,8 @@ pub enum DocKind {
     Xlsx,
     Gaeb,
     Text,
+    /// Gescanntes Bild (TIFF), alle Seiten per OCR.
+    Tiff,
 }
 
 impl DocKind {
@@ -29,6 +31,7 @@ impl DocKind {
             DocKind::Xlsx => "xlsx",
             DocKind::Gaeb => "gaeb",
             DocKind::Text => "text",
+            DocKind::Tiff => "tiff",
         }
     }
 
@@ -38,6 +41,7 @@ impl DocKind {
             "xlsx" => DocKind::Xlsx,
             "gaeb" => DocKind::Gaeb,
             "text" => DocKind::Text,
+            "tiff" => DocKind::Tiff,
             _ => return None,
         })
     }
@@ -52,6 +56,7 @@ pub fn detect_kind(path: &Path) -> Option<DocKind> {
         "x81" | "x82" | "x83" | "x84" | "x85" | "x86" | "d81" | "d82" | "d83" | "d84" | "d85"
         | "d86" => DocKind::Gaeb,
         "txt" | "md" => DocKind::Text,
+        "tif" | "tiff" => DocKind::Tiff,
         _ => return None,
     })
 }
@@ -228,9 +233,17 @@ mod tests {
         assert_eq!(k("lv.d83"), Some(DocKind::Gaeb));
         assert_eq!(k("n.txt"), Some(DocKind::Text));
         assert_eq!(k("n.md"), Some(DocKind::Text));
+        assert_eq!(k("scan.TIF"), Some(DocKind::Tiff));
+        assert_eq!(k("scan.tiff"), Some(DocKind::Tiff));
         assert_eq!(k("bild.jpg"), None);
         assert_eq!(k("ohne_endung"), None);
-        for kind in [DocKind::Pdf, DocKind::Xlsx, DocKind::Gaeb, DocKind::Text] {
+        for kind in [
+            DocKind::Pdf,
+            DocKind::Xlsx,
+            DocKind::Gaeb,
+            DocKind::Text,
+            DocKind::Tiff,
+        ] {
             assert_eq!(DocKind::parse(kind.as_str()), Some(kind));
         }
     }

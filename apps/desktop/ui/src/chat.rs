@@ -18,7 +18,7 @@ fn history(ctx: Ctx) -> Vec<ChatTurn> {
         .into_iter()
         .filter_map(|e| match e.state.get_untracked() {
             ChatState::Done(r) => Some(ChatTurn {
-                question: e.question.get_value(),
+                question: e.question,
                 answer: r.answer,
             }),
             _ => None,
@@ -32,10 +32,10 @@ fn ask(ctx: Ctx, question: String) {
         id: ctx
             .chat
             .with_untracked(|c| c.last().map_or(0, |e| e.id + 1)),
-        question: StoredValue::new(question.clone()),
-        state: RwSignal::new(ChatState::Pending),
+        question: question.clone(),
+        state: ArcRwSignal::new(ChatState::Pending),
     };
-    ctx.chat.update(|c| c.push(entry));
+    ctx.chat.update(|c| c.push(entry.clone()));
     spawn_local(async move {
         let state = match tauri::chat(&question, hist).await {
             Ok(r) => ChatState::Done(r),
@@ -121,7 +121,7 @@ pub fn ChatPage() -> impl IntoView {
 fn Turn(entry: ChatEntry) -> impl IntoView {
     view! {
         <div class="turn">
-            <div class="bubble q">{entry.question.get_value()}</div>
+            <div class="bubble q">{entry.question.clone()}</div>
             {move || match entry.state.get() {
                 ChatState::Pending => view! {
                     <div class="bubble a"><span class="spinner"></span>" Antwort wird gesucht …"</div>

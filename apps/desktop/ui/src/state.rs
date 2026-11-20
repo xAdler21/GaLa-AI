@@ -41,11 +41,14 @@ pub enum ChatState {
     Failed(String),
 }
 
-#[derive(Clone, Copy)]
+/// Liegt im globalen Verlauf (`Ctx::chat`) und ueberlebt den Seitenwechsel. Deshalb `Arc`-Signale:
+/// ein `RwSignal` gehoerte der Chat-Seite und waere nach dem Wechsel zu "Angebote" verworfen
+/// (Zugriff darauf = Panik, die Oberflaeche haengt).
+#[derive(Clone)]
 pub struct ChatEntry {
     pub id: usize,
-    pub question: StoredValue<String>,
-    pub state: RwSignal<ChatState>,
+    pub question: String,
+    pub state: ArcRwSignal<ChatState>,
 }
 
 #[derive(Clone, Copy)]
