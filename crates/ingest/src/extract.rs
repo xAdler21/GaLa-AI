@@ -125,15 +125,44 @@ pub fn extract_xlsx(path: &Path) -> Result<Vec<PageText>, IngestError> {
 /// GAEB: jede Position (und jeder Titel) wird ein Absatz. Reine D8x-Dateien (GAEB 90, kein XML)
 /// werden als Text gelesen.
 pub fn extract_gaeb(path: &Path) -> Result<Vec<PageText>, IngestError> {
+    extract_gaeb_with_prices(path).map(|(pages, _)| pages)
+}
+
+/// Preiszeile einer GAEB-Abgabe (Phase 84–86) für die Preis-Historie. Zahlen als Text,
+/// damit sie ohne Rundung als `numeric` in die Datenbank gehen.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PriceRow {
+    pub phase: i16,
+    pub lv_name: String,
+    pub oz: String,
+    pub kurztext: String,
+    pub langtext: String,
+    pub menge: Option<String>,
+    pub einheit: Option<String>,
+    pub ep: String,
+    pub art: String,
+}
+
+/// Langtexte werden für die Historie gekürzt; zum Wiedererkennen reicht der Anfang.
+const PRICE_LANGTEXT_MAX: usize = 2000;
+
+/// Wie [`extract_gaeb`], liefert bei Abgaben (Phase 84–86) zusätzlich die Einheitspreise.
+pub fn extract_gaeb_with_prices(
+    path: &Path,
+) -> Result<(Vec<PageText>, Vec<PriceRow>), IngestError> {
     let bytes = read_bytes(path)?;
     match gaeb::import(&bytes) {
-        Ok(import) => {
+        Ok(mut import) => {
+            if (84..=86).contains(&import.phase.dp()) {
+                fill_texts_from_siblings(path, &mut import.lv);
+            }
             let mut paragraphs = Vec::new();
             collect_nodes(&import.lv.nodes, &mut paragraphs);
-            Ok(vec![PageText {
+            let pages = vec![PageText {
                 page: None,
                 text: paragraphs.join("\n\n"),
-            }])
+            }];
+            Ok((pages, price_rows(&import)))
         }
         Err(err) => {
             let is_d = path
@@ -141,11 +170,13 @@ pub fn extract_gaeb(path: &Path) -> Result<Vec<PageText>, IngestError> {
                 .and_then(|e| e.to_str())
                 .is_some_and(|e| e.to_lowercase().starts_with('d'));
             if is_d {
-                // TODO: GAEB-90-Parser; bis dahin der Rohtext (Satzarten stören die Suche kaum).
-                Ok(vec![PageText {
+                // GAEB-90-Datei, die der Parser nicht liest: der Rohtext (Satzarten stören die
+                // Suche kaum).
+                let pages = vec![PageText {
                     page: None,
                     text: decode_text(&bytes),
-                }])
+                }];
+                Ok((pages, Vec::new()))
             } else {
                 Err(IngestError::Extract {
                     path: path.to_path_buf(),
@@ -153,6 +184,157 @@ pub fn extract_gaeb(path: &Path) -> Result<Vec<PageText>, IngestError> {
                 })
             }
         }
+    }
+}
+
+/// Einheitspreise aus Angebot (84), Nebenangebot (85) oder Auftrag (86); die anderen Phasen
+/// enthalten keine Preise des Betriebs.
+fn price_rows(import: &gaeb::GaebImport) -> Vec<PriceRow> {
+    let phase = import.phase.dp();
+    if !(84..=86).contains(&phase) {
+        return Vec::new();
+    }
+    import
+        .lv
+        .positions()
+        .filter_map(|p| {
+            let ep = p.ep.value.filter(|ep| *ep > lv_model::Decimal::ZERO)?;
+            let kurztext = p.kurztext.value.as_deref().unwrap_or("").trim().to_string();
+            if kurztext.is_empty() {
+                return None;
+            }
+            Some(PriceRow {
+                phase: i16::from(phase),
+                lv_name: import.lv.name.clone(),
+                oz: p
+                    .oz
+                    .value
+                    .as_ref()
+                    .map(ToString::to_string)
+                    .unwrap_or_default(),
+                kurztext,
+                langtext: p
+                    .langtext
+                    .value
+                    .as_deref()
+                    .unwrap_or("")
+                    .chars()
+                    .take(PRICE_LANGTEXT_MAX)
+                    .collect(),
+                menge: p.menge.value.map(|m| m.to_string()),
+                einheit: p
+                    .einheit
+                    .value
+                    .map(|u| u.symbol().to_string())
+                    .or_else(|| p.einheit.raw.clone()),
+                ep: ep.to_string(),
+                art: art_str(p.art).to_string(),
+            })
+        })
+        .collect()
+}
+
+fn has_text(p: &lv_model::Position) -> bool {
+    p.kurztext
+        .value
+        .as_deref()
+        .is_some_and(|t| !t.trim().is_empty())
+}
+
+/// Eigene D84-Abgaben enthalten nur Preissätze. Die Texte stehen in der Ausschreibung
+/// (D83/X83) im selben Projektordner: Gesucht wird im Ordner der Datei und eine Ebene darüber;
+/// passend ist die erste GAEB-Datei mit Texten, die alle OZ der Abgabe enthält.
+fn fill_texts_from_siblings(path: &Path, lv: &mut lv_model::Lv) {
+    if lv.positions().all(has_text) {
+        return;
+    }
+    let ozs: Vec<lv_model::Oz> = lv.positions().filter_map(|p| p.oz.value.clone()).collect();
+    if ozs.is_empty() {
+        return;
+    }
+    for candidate in sibling_gaeb_files(path) {
+        let Ok(src) = std::fs::read(&candidate)
+            .map_err(drop)
+            .and_then(|b| gaeb::import(&b).map_err(drop))
+        else {
+            continue;
+        };
+        let by_oz: std::collections::HashMap<&lv_model::Oz, &lv_model::Position> = src
+            .lv
+            .positions()
+            .filter(|p| has_text(p))
+            .filter_map(|p| Some((p.oz.value.as_ref()?, p)))
+            .collect();
+        if !ozs.iter().all(|oz| by_oz.contains_key(oz)) {
+            continue;
+        }
+        for p in lv.positions_mut() {
+            let Some(s) = p.oz.value.as_ref().and_then(|oz| by_oz.get(oz)) else {
+                continue;
+            };
+            if !has_text(p) {
+                p.kurztext = s.kurztext.clone();
+                p.langtext = s.langtext.clone();
+            }
+            if p.menge.value.is_none() {
+                p.menge = s.menge.clone();
+            }
+            if p.einheit.value.is_none() && p.einheit.raw.is_none() {
+                p.einheit = s.einheit.clone();
+            }
+            p.art = s.art;
+        }
+        tracing::debug!(datei = %path.display(), texte = %candidate.display(), "Texte der Abgabe aus der Ausschreibung");
+        return;
+    }
+}
+
+/// GAEB-Dateien neben `path` (Ordner und Unterordner), dann eine Ebene höher; ohne `path`.
+fn sibling_gaeb_files(path: &Path) -> Vec<std::path::PathBuf> {
+    // shortcut: höchstens 200 Kandidaten, damit ein riesiger Ordner den Worker nicht aufhält.
+    const MAX: usize = 200;
+    let mut out: Vec<std::path::PathBuf> = Vec::new();
+    let ancestors = [
+        (path.parent(), 2),
+        (path.parent().and_then(Path::parent), 3),
+    ];
+    for (dir, depth) in ancestors {
+        let Some(dir) = dir else { continue };
+        let mut found: Vec<_> = walkdir::WalkDir::new(dir)
+            .max_depth(depth)
+            .into_iter()
+            .filter_map(Result::ok)
+            .filter(|e| e.file_type().is_file())
+            .map(walkdir::DirEntry::into_path)
+            .filter(|p| p != path && crate::scan::detect_kind(p) == Some(crate::DocKind::Gaeb))
+            .filter(|p| !out.contains(p))
+            .take(MAX)
+            .collect();
+        // Ausschreibungen (83, 81) zuerst.
+        found.sort_by_key(|p| {
+            let ext = p
+                .extension()
+                .and_then(|e| e.to_str())
+                .unwrap_or("")
+                .to_lowercase();
+            !(ext.ends_with("83") || ext.ends_with("81"))
+        });
+        out.extend(found);
+        if out.len() >= MAX {
+            break;
+        }
+    }
+    out
+}
+
+fn art_str(art: lv_model::PositionsArt) -> &'static str {
+    use lv_model::PositionsArt::*;
+    match art {
+        Normal => "normal",
+        Bedarf => "bedarf",
+        Alternativ => "alternativ",
+        Zulage => "zulage",
+        Stundenlohn => "stundenlohn",
     }
 }
 
@@ -283,6 +465,93 @@ mod tests {
         let x = dir.path().join("kaputt.x83");
         std::fs::write(&x, "kein xml").unwrap();
         assert!(extract_gaeb(&x).is_err());
+    }
+
+    /// GAEB-90-Datei aus Inhaltszeilen (Sp. 1–74), mit laufender Nummer und CRLF.
+    fn d90(lines: &[&str]) -> String {
+        lines
+            .iter()
+            .enumerate()
+            .map(|(i, l)| format!("{l:<74}{:06}\r\n", i + 1))
+            .collect()
+    }
+
+    #[test]
+    fn gaeb_offer_yields_prices_tender_does_not() {
+        let body = [
+            "1101       N    Bereich",
+            "12Pflaster",
+            "2101010001 NNN         00000012500m2",
+            "25Betonpflaster verlegen",
+            "26   Grau, 8 cm",
+            "2301010001  0000004550  000000568750",
+            "2101010002 NEN         00000001000St",
+            "25Bedarf: Rinne",
+            "2301010002  0000012000  000000120000",
+            "2301010003  0000000000  000000000000",
+            "3101",
+            "99",
+        ];
+        let dir = tempfile::tempdir().unwrap();
+        let offer = dir.path().join("abgabe.d84");
+        let mut lines =
+            vec!["00        84                                                  1122PPPPI90"];
+        lines.extend(body);
+        std::fs::write(&offer, d90(&lines)).unwrap();
+        let (pages, rows) = extract_gaeb_with_prices(&offer).unwrap();
+        assert!(pages[0].text.contains("Betonpflaster"));
+        // Satz 23 ohne Position (01.01.0003, EP 0) zählt nicht.
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].oz, "01.01.0001");
+        assert_eq!(rows[0].ep, "45.500");
+        assert_eq!(rows[0].menge.as_deref(), Some("12.500"));
+        assert_eq!(rows[0].einheit.as_deref(), Some("m2"));
+        assert_eq!(rows[0].langtext, "Grau, 8 cm");
+        assert_eq!(rows[1].art, "bedarf");
+
+        let tender = dir.path().join("ausschreibung.d83");
+        lines[0] = "00        83                                                  1122PPPPI90";
+        std::fs::write(&tender, d90(&lines)).unwrap();
+        assert!(extract_gaeb_with_prices(&tender).unwrap().1.is_empty());
+    }
+
+    #[test]
+    fn offer_without_texts_takes_them_from_tender_in_project() {
+        let head83 = "00        83                                                  1122PPPPI90";
+        let head84 = "00        84                                                  1122PPPPI90";
+        let project = tempfile::tempdir().unwrap();
+        let lv_dir = project.path().join("02_LV");
+        let abgabe_dir = project.path().join("03_Abgabe");
+        std::fs::create_dir_all(&lv_dir).unwrap();
+        std::fs::create_dir_all(&abgabe_dir).unwrap();
+        std::fs::write(
+            lv_dir.join("Ausschreibung.d83"),
+            d90(&[
+                head83,
+                "2101010001 NNN         00000012500m2",
+                "25Betonpflaster verlegen",
+                "2101010002 NEN         00000001000St",
+                "25Rinne",
+                "99",
+            ]),
+        )
+        .unwrap();
+        let offer = abgabe_dir.join("LA0001A.d84");
+        std::fs::write(
+            &offer,
+            d90(&[
+                head84,
+                "2301010001  0000004550  000000568750",
+                "2301010002  0000012000  000000120000",
+                "99",
+            ]),
+        )
+        .unwrap();
+        let (_, rows) = extract_gaeb_with_prices(&offer).unwrap();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].kurztext, "Betonpflaster verlegen");
+        assert_eq!(rows[0].menge.as_deref(), Some("12.500"));
+        assert_eq!(rows[1].art, "bedarf");
     }
 
     #[test]

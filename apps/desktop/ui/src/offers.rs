@@ -1,6 +1,6 @@
 //! Angebote: LV-Liste, Import, Einheitspreise eingeben (speichert sofort), Abgabe exportieren.
 
-use api_types::client::{ExportFormat, LvDetail, LvSummary, PriceEntry};
+use api_types::client::{ExportFormat, LvDetail, LvSummary, PriceEntry, PriceRef};
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use lv_model::number::{NumberLocale, parse_decimal};
@@ -328,6 +328,8 @@ fn LvEditor(id: String) -> impl IntoView {
     let save_error = RwSignal::new(None::<String>);
     let only_open = RwSignal::new(false);
     let export_state = RwSignal::new(ExportState::Idle);
+    // Frühere Preise je OZ; kommen nach dem LV, die Tabelle wartet nicht darauf.
+    let suggestions = RwSignal::new(std::collections::HashMap::<Oz, Vec<PriceRef>>::new());
     // Warteschlange: immer nur eine Speicher-Anfrage unterwegs, sonst kollidieren die Revisionen.
     let queue = ArcStoredValue::new(Vec::<PriceEntry>::new());
     let in_flight = RwSignal::new(false);
@@ -344,6 +346,10 @@ fn LvEditor(id: String) -> impl IntoView {
                     summary.try_set(Some(d.summary));
                     load_error.try_set(None);
                     save_error.try_set(None);
+                    // Vorschläge sind ein Zusatz: Fehler hier nur protokollieren.
+                    if let Ok(list) = tauri::lv_suggestions(&id).await {
+                        suggestions.try_set(list.into_iter().map(|s| (s.oz, s.refs)).collect());
+                    }
                 }
                 Err(e) => {
                     ctx.handle_error(&e);
@@ -495,13 +501,13 @@ fn LvEditor(id: String) -> impl IntoView {
     let render_row = move |row: Row| match row {
         Row::Title { depth, oz, label } => view! {
             <tr class=format!("title d{}", depth.min(3))>
-                <td>{oz}</td><td colspan="5">{label}</td>
+                <td>{oz}</td><td colspan="6">{label}</td>
             </tr>
         }
         .into_any(),
         Row::Pos(p) => {
             let enqueue = enqueue.clone();
-            let (p1, p2, p3, p4) = (p.clone(), p.clone(), p.clone(), p.clone());
+            let (p1, p2, p3, p4, p5) = (p.clone(), p.clone(), p.clone(), p.clone(), p.clone());
             let counts = p.art.counts_towards_total();
             let has_long = !p.langtext.is_empty();
             let idx = p.idx;
@@ -533,6 +539,24 @@ fn LvEditor(id: String) -> impl IntoView {
                                     focus_ep(idx + 1);
                                 }
                             }/>
+                    </td>
+                    <td class="num hist">
+                        {
+                            let (p, enqueue) = (p5.clone(), enqueue.clone());
+                            move || suggestions.with(|m| m.get(&p.oz).and_then(|refs| refs.first().cloned()).map(|best| {
+                                let all = suggestions.with(|m| m.get(&p.oz).cloned().unwrap_or_default());
+                                let title = all.iter().map(|r| format!("{} € / {} – {} – {} ({}, {} %)",
+                                    money(r.ep), r.einheit.clone().unwrap_or_default(), r.kurztext, r.lv_name,
+                                    r.date.format("%Y"), (r.similarity * 100.0).round())).collect::<Vec<_>>().join("\n");
+                                let (p, enqueue) = (p.clone(), enqueue.clone());
+                                view! {
+                                    <button class="hist-btn" title=title on:click=move |_| {
+                                        p.ep_text.set(fmt_de(best.ep, 2));
+                                        enqueue(&p);
+                                    }>{format!("{} · {}", money(best.ep), best.date.format("%Y"))}</button>
+                                }
+                            }))
+                        }
                     </td>
                     <td class="num gp" class:muted=!counts>
                         {move || match (p.state.get(), p.gp.get()) {
@@ -615,7 +639,9 @@ fn LvEditor(id: String) -> impl IntoView {
             <table class="lv">
                 <thead><tr>
                     <th>"OZ"</th><th>"Kurztext"</th><th class="num">"Menge"</th><th>"Einheit"</th>
-                    <th class="num">"EP €"</th><th class="num">"GP €"</th>
+                    <th class="num">"EP €"</th>
+                    <th class="num" title="Früherer Einheitspreis zu einer ähnlichen Position aus den GAEB-Abgaben im Archiv; Klick übernimmt ihn">"Früher"</th>
+                    <th class="num">"GP €"</th>
                 </tr></thead>
                 <tbody>
                     {move || rows.get().into_iter().map(render_row.clone()).collect_view()}

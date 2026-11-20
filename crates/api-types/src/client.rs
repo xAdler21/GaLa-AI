@@ -145,6 +145,32 @@ pub struct PriceEntry {
     pub ep: Option<Decimal>,
 }
 
+/// `GET /api/v1/lvs/{id}/suggestions` – frühere Einheitspreise zu ähnlichen Positionen.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PriceSuggestion {
+    pub oz: Oz,
+    /// Bester Treffer zuerst.
+    pub refs: Vec<PriceRef>,
+}
+
+/// Ein früherer Preis aus einer GAEB-Abgabe im Archiv.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PriceRef {
+    pub ep: Decimal,
+    pub einheit: Option<String>,
+    pub menge: Option<Decimal>,
+    pub kurztext: String,
+    pub lv_name: String,
+    /// 84 Angebot, 85 Nebenangebot, 86 Auftrag.
+    pub phase: u8,
+    /// Pfad im Archiv.
+    pub path: String,
+    /// Änderungsdatum der Datei.
+    pub date: DateTime<Utc>,
+    /// Ähnlichkeit der Kurztexte, 0–1.
+    pub similarity: f32,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ExportFormat {

@@ -17,6 +17,7 @@ use sqlx::postgres::PgPoolOptions;
 pub mod audit;
 pub mod index_status;
 pub mod lvs;
+pub mod prices;
 pub mod releases;
 pub mod sessions;
 pub mod settings;

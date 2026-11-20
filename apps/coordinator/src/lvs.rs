@@ -1,7 +1,8 @@
 //! Angebote: LV importieren, Einheitspreise setzen, Abgabe (X84/D84) und Excel exportieren.
 
 use api_types::client::{
-    ExportFormat, LvDetail, LvExport, LvImportRequest, LvSummary, PriceUpdateRequest,
+    ExportFormat, LvDetail, LvExport, LvImportRequest, LvSummary, PriceRef, PriceSuggestion,
+    PriceUpdateRequest,
 };
 use axum::extract::rejection::JsonRejection;
 use axum::extract::{DefaultBodyLimit, Path, State};
@@ -11,7 +12,7 @@ use axum::{Json, Router};
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as B64;
 use db::lvs::{LvFull, LvRow, LvStats, NewLv};
-use lv_model::{Decimal, Field, Lv, LvSource};
+use lv_model::{Decimal, Field, Lv, LvSource, Position, Unit};
 use uuid::Uuid;
 
 use crate::api::AuthUser;
@@ -36,6 +37,7 @@ pub fn router() -> Router<AppState> {
         .route("/api/v1/lvs/{id}", get(detail).delete(remove))
         .route("/api/v1/lvs/{id}/prices", put(set_prices))
         .route("/api/v1/lvs/{id}/export/{format}", get(export))
+        .route("/api/v1/lvs/{id}/suggestions", get(suggestions))
 }
 
 fn stats(lv: &Lv) -> LvStats {
@@ -253,6 +255,112 @@ async fn remove(
     Ok(StatusCode::NO_CONTENT)
 }
 
+/// Treffer je Position aus der Datenbank, bevor nach Einheit gefiltert wird.
+const HITS_PER_POSITION: i64 = 12;
+/// Vorschläge je Position in der Antwort.
+const REFS_PER_POSITION: usize = 5;
+
+/// Passt die Einheit des früheren Preises? Unbekannte Einheiten zählen nur bei gleichem Text.
+fn same_unit(pos: &Position, other: Option<&str>) -> bool {
+    let Some(raw) = pos
+        .einheit
+        .raw
+        .as_deref()
+        .or(pos.einheit.value.map(Unit::symbol))
+    else {
+        return true;
+    };
+    let Some(other) = other else { return false };
+    match (
+        pos.einheit.value.or_else(|| Unit::parse(raw)),
+        Unit::parse(other),
+    ) {
+        (Some(a), Some(b)) => a == b,
+        _ => raw.trim().eq_ignore_ascii_case(other.trim()),
+    }
+}
+
+fn to_ref(h: db::prices::PriceHit) -> Option<PriceRef> {
+    Some(PriceRef {
+        ep: h.ep.parse().ok()?,
+        einheit: h.einheit,
+        menge: h.menge.and_then(|m| m.parse().ok()),
+        kurztext: h.kurztext,
+        lv_name: h.lv_name,
+        phase: u8::try_from(h.phase).unwrap_or(0),
+        path: h.rel_path,
+        date: h.mtime,
+        similarity: h.similarity,
+    })
+}
+
+/// Ordnet die Treffer den Positionen zu: Einheit muss passen, gleiche Preise aus Kopien
+/// derselben Abgabe zählen einmal.
+fn group_hits(positions: &[&Position], hits: Vec<db::prices::PriceHit>) -> Vec<PriceSuggestion> {
+    let mut out: Vec<PriceSuggestion> = Vec::new();
+    for h in hits {
+        let Some(pos) = usize::try_from(h.query_idx - 1)
+            .ok()
+            .and_then(|i| positions.get(i))
+        else {
+            continue;
+        };
+        let Some(oz) = pos.oz.value.clone() else {
+            continue;
+        };
+        if !same_unit(pos, h.einheit.as_deref()) {
+            continue;
+        }
+        let Some(r) = to_ref(h) else { continue };
+        let entry = match out.iter_mut().position(|s| s.oz == oz) {
+            Some(i) => &mut out[i],
+            None => {
+                out.push(PriceSuggestion {
+                    oz,
+                    refs: Vec::new(),
+                });
+                out.last_mut().expect("eben angelegt")
+            }
+        };
+        let dup = entry
+            .refs
+            .iter()
+            .any(|e| e.ep == r.ep && e.kurztext == r.kurztext && e.lv_name == r.lv_name);
+        if !dup && entry.refs.len() < REFS_PER_POSITION {
+            entry.refs.push(r);
+        }
+    }
+    out
+}
+
+async fn suggestions(
+    State(state): State<AppState>,
+    _user: AuthUser,
+    Path(id): Path<Uuid>,
+) -> Result<Json<Vec<PriceSuggestion>>, ApiErr> {
+    let full = load(&state, id).await?;
+    let lv = parse_lv(&full)?;
+    let positions: Vec<&Position> = lv
+        .positions()
+        .filter(|p| p.oz.value.is_some())
+        .filter(|p| {
+            p.kurztext
+                .value
+                .as_deref()
+                .is_some_and(|t| !t.trim().is_empty())
+        })
+        .collect();
+    let texts: Vec<String> = positions
+        .iter()
+        .map(|p| p.kurztext.value.clone().unwrap_or_default())
+        .collect();
+    if texts.is_empty() {
+        return Ok(Json(Vec::new()));
+    }
+    let hits = db::prices::similar(&state.db, &texts, HITS_PER_POSITION).await?;
+    Ok(Json(group_hits(&positions, hits)))
+}
+
 fn file_stem(name: &str) -> &str {
     let base = name.rsplit(['/', '\\']).next().unwrap_or(name);
     base.rsplit_once('.').map_or(base, |(stem, _)| stem)
@@ -406,6 +514,41 @@ mod tests {
             prices: vec![entry("01.0010", Some(Decimal::new(-1, 0)))],
         };
         assert!(apply_prices(&mut lv, &negative).is_err());
+    }
+
+    fn hit(idx: i32, ep: &str, einheit: Option<&str>, lv: &str) -> db::prices::PriceHit {
+        db::prices::PriceHit {
+            query_idx: idx,
+            ep: ep.into(),
+            menge: None,
+            einheit: einheit.map(Into::into),
+            kurztext: "Rasen".into(),
+            lv_name: lv.into(),
+            phase: 84,
+            rel_path: "2020/x.d84".into(),
+            mtime: chrono::Utc::now(),
+            similarity: 0.8,
+        }
+    }
+
+    #[test]
+    fn hits_grouped_by_position_unit_checked_and_deduplicated() {
+        let mut rasen = Position::new(Oz::parse("01.0010").unwrap(), "Rasen");
+        rasen.einheit = Field::parsed(Unit::parse("qm"), "qm");
+        let ohne = Position::new(Oz::parse("01.0020").unwrap(), "Baustelle");
+        let hits = vec![
+            hit(1, "3.50", Some("m2"), "Kita"),
+            hit(1, "3.50", Some("m²"), "Kita"),
+            hit(1, "9.00", Some("St"), "Schule"),
+            hit(1, "4.10", Some("m2"), "Schule"),
+            hit(2, "500", None, "Kita"),
+            hit(7, "1", None, "unbekannt"),
+        ];
+        let out = group_hits(&[&rasen, &ohne], hits);
+        assert_eq!(out.len(), 2);
+        let eps: Vec<String> = out[0].refs.iter().map(|r| r.ep.to_string()).collect();
+        assert_eq!(eps, ["3.50", "4.10"]);
+        assert_eq!(out[1].refs.len(), 1);
     }
 
     #[test]

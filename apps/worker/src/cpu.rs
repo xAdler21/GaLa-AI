@@ -81,6 +81,7 @@ impl CpuHandler {
         store::delete_followup_tasks(&self.pool, id).await?;
 
         let path = self.archive_root.join(&info.rel_path);
+        let mut prices = Vec::new();
         let (pages, ocr_pages): (Vec<PageText>, Vec<u32>) = match info.kind {
             DocKind::Pdf => {
                 let p = path.clone();
@@ -112,21 +113,28 @@ impl CpuHandler {
             }
             kind => {
                 let p = path.clone();
-                let pages = tokio::task::spawn_blocking(move || {
+                let (pages, rows) = tokio::task::spawn_blocking(move || {
                     match kind {
-                        DocKind::Xlsx => extract::extract_xlsx(&p),
-                        DocKind::Gaeb => extract::extract_gaeb(&p),
-                        _ => extract::extract_text(&p),
+                        DocKind::Xlsx => extract::extract_xlsx(&p).map(|t| (t, Vec::new())),
+                        DocKind::Gaeb => extract::extract_gaeb_with_prices(&p),
+                        _ => extract::extract_text(&p).map(|t| (t, Vec::new())),
                     }
                     .map_err(|e| error_chain(&e))
                 })
                 .await
                 .context("Extraktions-Thread abgestürzt")?
                 .map_err(|m| anyhow!("{}: {m}", info.rel_path))?;
+                prices = rows;
                 (pages, Vec::new())
             }
         };
 
+        if info.kind == DocKind::Gaeb {
+            let n = store::replace_price_refs(&self.pool, id, &prices).await?;
+            if n > 0 {
+                tracing::info!(dokument = %info.rel_path, preise = n, "Preise in die Historie übernommen");
+            }
+        }
         let chunks = ingest::chunk_pages(&pages, &self.chunking);
         let n = store::insert_chunks(&self.pool, id, &chunks).await?;
         for page in &ocr_pages {

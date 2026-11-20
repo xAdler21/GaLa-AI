@@ -499,3 +499,40 @@ async fn update_changed(pool: &PgPool, file: &ScannedFile) -> Result<bool, Inges
     tx.commit().await?;
     Ok(true)
 }
+
+/// Ersetzt die Preis-Historie eines Dokuments (bei jeder Extraktion neu, auch wenn leer).
+pub async fn replace_price_refs(
+    pool: &PgPool,
+    document_id: Uuid,
+    rows: &[crate::extract::PriceRow],
+) -> Result<usize, IngestError> {
+    let mut tx = pool.begin().await?;
+    sqlx::query("DELETE FROM price_ref WHERE document_id = $1")
+        .bind(document_id)
+        .execute(&mut *tx)
+        .await?;
+    if !rows.is_empty() {
+        let col =
+            |f: fn(&crate::extract::PriceRow) -> String| rows.iter().map(f).collect::<Vec<_>>();
+        sqlx::query(
+            "INSERT INTO price_ref (document_id, phase, lv_name, oz, kurztext, langtext, menge, einheit, ep, art) \
+             SELECT $1, u.phase, u.lv_name, u.oz, u.kurztext, u.langtext, u.menge::numeric, u.einheit, u.ep::numeric, u.art \
+             FROM UNNEST($2::int2[], $3::text[], $4::text[], $5::text[], $6::text[], $7::text[], $8::text[], $9::text[], $10::text[]) \
+             AS u(phase, lv_name, oz, kurztext, langtext, menge, einheit, ep, art)",
+        )
+        .bind(document_id)
+        .bind(rows.iter().map(|r| r.phase).collect::<Vec<_>>())
+        .bind(col(|r| r.lv_name.clone()))
+        .bind(col(|r| r.oz.clone()))
+        .bind(col(|r| r.kurztext.clone()))
+        .bind(col(|r| r.langtext.clone()))
+        .bind(rows.iter().map(|r| r.menge.clone()).collect::<Vec<_>>())
+        .bind(rows.iter().map(|r| r.einheit.clone()).collect::<Vec<_>>())
+        .bind(col(|r| r.ep.clone()))
+        .bind(col(|r| r.art.clone()))
+        .execute(&mut *tx)
+        .await?;
+    }
+    tx.commit().await?;
+    Ok(rows.len())
+}

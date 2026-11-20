@@ -48,6 +48,7 @@ Die DTOs stehen in `crates/api-types/src/client.rs` und sind die einzige Quelle 
   - `GET /lvs`, `POST /lvs` (Import, Datei als Base64), `GET /lvs/{id}`, `DELETE /lvs/{id}`
   - `PUT /lvs/{id}/prices` (EP setzen, mit `revision`; veraltet → 409 `conflict`)
   - `GET /lvs/{id}/export/{x84|d84|xlsx}` (JSON mit Base64; X84 nur aus X8x, D84 nur aus D8x)
+  - `GET /lvs/{id}/suggestions` (frühere EPs zu ähnlichen Kurztexten aus der Preis-Historie)
   - `GET /updates/{target}/{arch}/{current_version}`
 - **Auth:** `Authorization: Bearer <token>`. In der DB liegt nur der SHA-256-Hash des Tokens.
 - **Wartungsmodus:** Alles außer `health`, `auth/*` und `updates/*` antwortet mit 503 und `ApiError { code: "maintenance" }`.
@@ -128,6 +129,10 @@ Jede VM hat den Linux-Nutzer `claude` mit sudo (NOPASSWD). Den Schlüssel liefer
 - `invalid_file` (422): Import-Datei ist keine lesbare GAEB-Datei.
 - `export_failed` (422): Abgabe ließ sich aus dem Original nicht erzeugen.
 - `conflict` (409): Das LV wurde seit dem Laden von jemand anderem gespeichert.
+
+### Preis-Historie (Tabelle `price_ref`)
+- Der Worker (Rolle `cpu`) schreibt beim Extrahieren einer GAEB-Datei der Phase 84–86 deren Einheitspreise (Positionen mit Kurztext und EP > 0). Fehlen einer D84 die Texte, kommen sie aus einer Ausschreibung (D8x/X8x) im selben Ordner oder eine Ebene darüber, Zuordnung über die OZ.
+- Vorschläge: Trigramm-Ähnlichkeit (`pg_trgm`, ab 0,3) des Kurztexts, gleiche Einheit, je Position höchstens 5.
 
 ### Migrationen
 `crates/db/migrations/`, Nummernkreise siehe `crates/db/src/lib.rs`.

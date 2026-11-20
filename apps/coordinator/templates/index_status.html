@@ -49,6 +49,10 @@
     {{ index.docs_in_progress }} in Arbeit, {{ index.docs_failed }} gescheitert.
     Restzeit nach dem Durchsatz der letzten Stunde; neu gefundene Seiten verlängern sie.
   </p>
+  <p class="muted">
+    Preis-Historie: {{ index.prices }} Preise aus {{ index.price_docs }} GAEB-Abgaben
+    (Vorschläge in der Desktop-App unter „Angebote“).
+  </p>
 
   <h3>Sprachmodell (Chat)</h3>
   {% if index.llm.reachable %}

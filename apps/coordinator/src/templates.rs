@@ -153,6 +153,9 @@ pub struct IndexStatusView {
     pub failures: Vec<TaskLineView>,
     pub llm: LlmView,
     pub chats: Vec<ChatEventView>,
+    /// Preis-Historie: Preise und Abgaben, aus denen sie stammen.
+    pub prices: i64,
+    pub price_docs: i64,
 }
 
 #[derive(Template)]
@@ -352,6 +355,8 @@ mod tests {
                 outcome: "context size".into(),
                 outcome_full: "context size".into(),
             }],
+            prices: 3336,
+            price_docs: 39,
         }
     }
 
@@ -369,6 +374,7 @@ mod tests {
         assert!(html.contains("OCR (Seiten)"));
         assert!(html.contains(">41<"));
         assert!(html.contains("ca. 1,1 h"));
+        assert!(html.contains("3336 Preise aus 39 GAEB-Abgaben"));
         assert!(html.contains("Kontext je Slot 16384"));
         assert!(html.contains("context size"));
         assert!(
@@ -397,6 +403,8 @@ mod tests {
                 failures: vec![],
                 llm: LlmView::default(),
                 chats: vec![],
+                prices: 0,
+                price_docs: 0,
             },
         }
         .render()

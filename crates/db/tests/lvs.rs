@@ -76,3 +76,50 @@ async fn lv_roundtrip() {
         .await
         .unwrap();
 }
+
+#[tokio::test]
+async fn price_history_similar() {
+    let Ok(url) = std::env::var("GALA_TEST_DATABASE_URL") else {
+        return;
+    };
+    let pool = db::connect(&url).await.unwrap();
+    db::migrate(&pool).await.unwrap();
+    let doc: uuid::Uuid = sqlx::query_scalar(
+        "INSERT INTO document (rel_path, size, mtime, sha256, kind) \
+         VALUES ('test/' || gen_random_uuid() || '.d84', 1, now(), 'x', 'gaeb') RETURNING id",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO price_ref (document_id, phase, lv_name, oz, kurztext, einheit, ep) VALUES \
+         ($1, 84, 'Kita', '01.0010', 'Betonpflaster 8 cm verlegen', 'm2', 45.5), \
+         ($1, 84, 'Kita', '01.0020', 'Rasen ansäen', 'm2', 3.2)",
+    )
+    .bind(doc)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let hits = db::prices::similar(
+        &pool,
+        &[
+            "Betonpflaster verlegen, 8 cm".into(),
+            "Baum pflanzen".into(),
+        ],
+        5,
+    )
+    .await
+    .unwrap();
+    assert!(
+        hits.iter().any(|h| h.query_idx == 1 && h.ep == "45.5"),
+        "{hits:?}"
+    );
+    assert!(hits.iter().all(|h| h.query_idx != 2 || h.similarity >= 0.3));
+    let (n, docs) = db::prices::stats(&pool).await.unwrap();
+    assert!(n >= 2 && docs >= 1);
+    sqlx::query("DELETE FROM document WHERE id = $1")
+        .bind(doc)
+        .execute(&pool)
+        .await
+        .unwrap();
+}

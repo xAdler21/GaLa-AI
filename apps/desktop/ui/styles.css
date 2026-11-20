@@ -205,3 +205,6 @@ input.ep { width: 7.5rem; text-align: right; padding: .3rem .45rem; border: 1px 
 input.ep:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent); }
 input.ep.err { border-color: var(--danger); background: var(--danger-bg); }
 tr.pos.priced input.ep { background: var(--surface); }
+table.lv td.hist { white-space: nowrap; }
+.hist-btn { background: none; border: 1px dashed var(--border); border-radius: 6px; padding: .15rem .45rem; font-size: .82rem; color: var(--muted); cursor: pointer; font-variant-numeric: tabular-nums; }
+.hist-btn:hover { border-color: var(--accent); color: var(--accent); }

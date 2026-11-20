@@ -147,6 +147,7 @@ fn main() {
             lvs::lv_get,
             lvs::lv_set_prices,
             lvs::lv_delete,
+            lvs::lv_suggestions,
             lvs::lv_export,
             lvs::show_in_folder,
             updates::check_update,

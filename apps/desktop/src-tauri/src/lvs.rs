@@ -4,7 +4,7 @@
 use std::path::{Path, PathBuf};
 
 use api_types::client::{
-    LvDetail, LvExport, LvImportRequest, LvSummary, PriceEntry, PriceUpdateRequest,
+    LvDetail, LvExport, LvImportRequest, LvSummary, PriceEntry, PriceSuggestion, PriceUpdateRequest,
 };
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as B64;
@@ -60,6 +60,16 @@ pub async fn lv_set_prices(
     let path = format!("/lvs/{}/prices", check_id(&id)?);
     let body = PriceUpdateRequest { revision, prices };
     net::authed(&app, &state.http, Method::PUT, &path, Some(&body)).await
+}
+
+#[tauri::command]
+pub async fn lv_suggestions(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+) -> CmdResult<Vec<PriceSuggestion>> {
+    let path = format!("/lvs/{}/suggestions", check_id(&id)?);
+    net::authed(&app, &state.http, Method::GET, &path, None::<&()>).await
 }
 
 #[tauri::command]

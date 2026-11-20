@@ -3,7 +3,7 @@
 
 use api_types::client::{
     ApiError, ChatRequest, ChatResponse, ChatTurn, HealthResponse, LvDetail, LvSummary, PriceEntry,
-    UserInfo,
+    PriceSuggestion, UserInfo,
 };
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use wasm_bindgen::prelude::*;
@@ -226,6 +226,10 @@ pub async fn lv_set_prices(id: &str, revision: i32, prices: &[PriceEntry]) -> Re
         },
     )
     .await
+}
+
+pub async fn lv_suggestions(id: &str) -> Res<Vec<PriceSuggestion>> {
+    call("lv_suggestions", &IdArg { id }).await
 }
 
 pub async fn lv_delete(id: &str) -> Res<()> {
