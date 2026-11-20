@@ -36,7 +36,7 @@ services:
       - "99"
       # Gesamt-Kontext; verteilt auf --parallel Slots (je Slot = LLM_CTX / 2)
       - --ctx-size
-      - "${LLM_CTX:-16384}"
+      - "${LLM_CTX:-32768}"
       - --split-mode
       - layer
       # Verteilung der Layer auf GPU 0 (3070) und GPU 1 (1070), z. B. 3,2

@@ -109,8 +109,24 @@ impl<E: Embedder, S: Search, L: Llm> ChatService<E, S, L> {
             });
         }
 
-        let messages = build_messages(question, history, &hits);
-        let answer = self.llm.complete(messages).await?.trim().to_string();
+        // Passt der Prompt nicht in den Kontext des Sprachmodells (lange OCR-Texte, langer
+        // Verlauf), erst die Quellen halbieren, zuletzt ohne Verlauf fragen.
+        let mut k = hits.len();
+        let mut hist = history;
+        let answer = loop {
+            let messages = build_messages(question, hist, &hits[..k]);
+            match self.llm.complete(messages).await {
+                Err(e) if is_context_overflow(&e) && k > 1 => k /= 2,
+                Err(e) if is_context_overflow(&e) && !hist.is_empty() => hist = &[],
+                r => break r?.trim().to_string(),
+            }
+            tracing::info!(
+                quellen = k,
+                verlauf = hist.len(),
+                "Prompt zu lang, neuer Versuch"
+            );
+        };
+        let hits = &hits[..k];
         if answer.is_empty() || answer.starts_with(NOT_FOUND) {
             return Ok(ChatResponse {
                 answer: NOT_FOUND.to_string(),
@@ -131,6 +147,12 @@ Erfinde nichts und nutze kein Wissen außerhalb der Quellen. \
 Wenn die Quellen die Frage nicht beantworten, antworte genau mit: \
 \"Dazu habe ich in den Dokumenten nichts gefunden.\" \
 Antworte auf Deutsch, knapp und sachlich. Preise, Mengen und Daten gibst du genau so wieder, wie sie in den Quellen stehen.";
+
+/// llama-server lehnt Anfragen über der Kontextgröße mit 400 ab.
+fn is_context_overflow(e: &ChatError) -> bool {
+    matches!(e, ChatError::Llm(llm::LlmError::Status { status: 400, body })
+        if body.contains("context size"))
+}
 
 /// System-Prompt, frühere Runden und die Frage samt nummerierten Quellen.
 pub fn build_messages(question: &str, history: &[ChatTurn], hits: &[Hit]) -> Vec<ChatMessage> {
@@ -206,10 +228,19 @@ mod tests {
     struct FakeLlm {
         reply: String,
         seen: Mutex<Vec<ChatMessage>>,
+        /// Wie llama-server: längere Prompts (in Zeichen) werden mit 400 abgelehnt.
+        max_chars: usize,
     }
     impl Llm for FakeLlm {
         async fn complete(&self, messages: Vec<ChatMessage>) -> Result<String, ChatError> {
+            let len: usize = messages.iter().map(|m| m.content.chars().count()).sum();
             *self.seen.lock().unwrap() = messages;
+            if len > self.max_chars {
+                return Err(ChatError::Llm(llm::LlmError::Status {
+                    status: 400,
+                    body: format!("request ({len} tokens) exceeds the available context size"),
+                }));
+            }
             Ok(self.reply.clone())
         }
     }
@@ -231,6 +262,7 @@ mod tests {
             FakeLlm {
                 reply: reply.into(),
                 seen: Mutex::new(Vec::new()),
+                max_chars: usize::MAX,
             },
         )
     }
@@ -311,5 +343,32 @@ mod tests {
         assert_eq!(t.chars().count(), SNIPPET_CHARS);
         assert!(t.ends_with('…'));
         assert_eq!(snippet("kurz\n\n  text"), "kurz text");
+    }
+
+    #[tokio::test]
+    async fn too_long_prompt_retries_with_fewer_sources_then_without_history() {
+        let hits: Vec<Hit> = (0..8)
+            .map(|i| hit(&format!("d{i}.pdf"), None, &"x".repeat(1000)))
+            .collect();
+        let mut svc = service(hits, "Antwort [1]");
+        let history = vec![ChatTurn {
+            question: "alt".into(),
+            answer: "y".repeat(3000),
+        }];
+
+        // 2 Quellen passen nur ohne Verlauf nicht: erst 8 -> 4 -> 2 -> 1, dann ohne Verlauf.
+        svc.llm.max_chars = 2000;
+        let resp = svc.answer("Frage", &history).await.unwrap();
+        assert_eq!(resp.answer, "Antwort [1]");
+        assert_eq!(resp.sources.len(), 1);
+        assert_eq!(
+            svc.llm.seen.lock().unwrap().len(),
+            2,
+            "System + Frage, kein Verlauf"
+        );
+
+        // Passt gar nichts, kommt der Fehler durch.
+        svc.llm.max_chars = 10;
+        assert!(svc.answer("Frage", &history).await.is_err());
     }
 }
