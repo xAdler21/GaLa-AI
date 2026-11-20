@@ -133,7 +133,7 @@ docker_after_mounts() {
 
 # NAS (SMB) read-only nach /mnt/archiv. Zugangsdaten in /etc/gala/cifs-archiv.cred (0600).
 setup_cifs_archiv() {
-  install -d -m 0755 /mnt/archiv
+  mkdir -p /mnt/archiv # Einhängepunkt: install -d scheitert, wenn das NAS (ro) schon eingebunden ist
   if [ "$GALA_NAS_SHARE" = none ]; then
     log "GALA_NAS_SHARE ist 'none': NAS wird nicht eingebunden."
     return 0

@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Einrichtung von gala-llm (Ubuntu Server 24.04, Docker, NVIDIA-Treiber und
+# Einrichtung von gala-llm (Ubuntu Server, Docker, NVIDIA-Treiber und
 # NVIDIA Container Toolkit bereits installiert).
 #   sudo /opt/gala/deploy/llm/install.sh [--deploy-pubkey <datei>] [--no-start]
 #
 # Treiber: Branch 580 ist der letzte, der Pascal (GTX 1070) unterstützt.
-# Ubuntu: sudo ubuntu-drivers install nvidia:580   (bzw. Paket nvidia-driver-580-server)
+# Treiber und Toolkit installiert deploy/common/prepare-vm.sh --gpu.
 # Keine neueren Branches (590+) installieren, sonst fällt die 1070 aus.
 set -euo pipefail
 

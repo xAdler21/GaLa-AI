@@ -30,7 +30,8 @@ apt_install jq curl git openssl rsync openssh-client nfs-kernel-server cifs-util
 
 log "Nutzer, Verzeichnisse"
 ensure_user_gala
-install -d -m 0755 "$GALA_ETC" "$GALA_LIB" /var/log/gala /mnt/archiv
+install -d -m 0755 "$GALA_ETC" "$GALA_LIB" /var/log/gala
+mkdir -p /mnt/archiv # Einhängepunkt: install -d scheitert, wenn das NAS (ro) schon eingebunden ist
 install -d -m 0750 -o gala -g gala /srv/gala/data
 install -d -m 0755 -o gala -g gala /var/lib/gala /var/lib/gala/state
 install -d -m 0755 /var/lib/gala/caddy

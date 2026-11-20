@@ -36,7 +36,9 @@ apt_install jq curl git openssl nfs-common cifs-utils ufw
 
 log "Nutzer, Verzeichnisse"
 ensure_user_gala
-install -d -m 0755 "$GALA_ETC" "$GALA_LIB" /mnt/archiv /srv/gala/data
+install -d -m 0755 "$GALA_ETC" "$GALA_LIB"
+# Einhängepunkte nur anlegen: ist dort schon NFS/CIFS eingebunden, scheitert chmod (root_squash, ro).
+mkdir -p /mnt/archiv /srv/gala/data
 printf 'ocr\n' >"$GALA_ETC/role"
 
 log "Konfiguration"

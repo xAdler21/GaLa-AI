@@ -47,6 +47,10 @@ services:
       - --parallel
       - "2"
       - --jinja
+      # Kein "Denken" vor der Antwort (Qwen3): die Denk-Tokens zählen zu max_tokens der
+      # Aufrufer (Chatbot: 1024) und kosten bei 25 Token/s spürbar Zeit.
+      - --reasoning
+      - "${LLM_REASONING:-off}"
     deploy:
       resources:
         reservations:

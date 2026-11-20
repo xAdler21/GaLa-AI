@@ -312,6 +312,8 @@ Ein Platzcheck: `sudo /bin/bash /opt/gala/deploy/common/disk.sh report` (entspri
 - **Split prüfen:** `docker logs gala-llama 2>&1 | grep -Ei 'cuda|offload|buffer|split'` muss beide Karten und die verteilten Layer zeigen; `nvidia-smi` zeigt VRAM-Belegung auf beiden Karten. Ist eine Karte fast leer, den `LLM_TENSOR_SPLIT` ändern (z. B. `3,2`: mehr auf die 3070).
 - **VRAM:** `LLM_CTX` ist der Gesamt-Kontext, geteilt durch die 2 Slots (`--parallel 2`). Bei „out of memory“: `LLM_CTX` senken, kleinere Quantisierung oder anderes Modell wählen.
 - **Image pinnen:** `LLAMA_IMAGE_TAG` in `/etc/gala/llm.env` auf einen konkreten Build setzen (`server-cuda-b<nummer>`), damit ein Update nicht unbemerkt eine neue llama.cpp-Version zieht. Für ein bewusstes Upgrade den Tag ändern und `update.sh` laufen lassen (ändert sich nur die Env-Datei, die nicht im Repo liegt, `docker compose pull && up -d` von Hand ausführen).
+- **Denkphase:** Qwen3 „denkt“ standardmäßig vor jeder Antwort. Diese Tokens zählen zu `max_tokens` des Aufrufers (Chatbot: 1024) und kosten Zeit; deshalb startet llama-server mit `--reasoning off` (`LLM_REASONING` in `llm.env`).
+- **Stand 20.11.2026:** Qwen3-14B Q4_K_M auf Build `server-cuda-b12464`, Layer-Split `1,1`, `LLM_CTX=16384`: je Karte rund 5,7 von 8 GB belegt, etwa 22–25 Token/s beim Generieren. Mit den freien 2 GB je Karte ließe sich der Kontext ungefähr verdoppeln (`LLM_CTX=32768`), falls der Chatbot mehr Quellen mitschicken soll.
 - Test: `curl http://gala-llm:8080/health` von gala-coordinator aus; von einer anderen IP aus muss die Verbindung scheitern.
 
 ### 8.3 gala-ocr: OCR auf der CPU
