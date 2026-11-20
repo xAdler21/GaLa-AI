@@ -21,17 +21,45 @@ pub fn BootScreen() -> impl IntoView {
 pub fn SetupScreen() -> impl IntoView {
     let ctx = expect_context::<Ctx>();
     let initial = ctx.server.get_untracked();
-    let url = RwSignal::new(if initial.is_empty() { "https://gala-coordinator".to_owned() } else { initial });
+    let url = RwSignal::new(if initial.is_empty() {
+        "https://gala-coordinator".to_owned()
+    } else {
+        initial
+    });
     let status = RwSignal::new(None::<(bool, String)>);
     let busy = RwSignal::new(false);
     let can_cancel = !ctx.server.get_untracked().is_empty();
+    // Zeigt den Knopf "Server-Zertifikat installieren" (Fehler `untrusted_cert`).
+    let cert = RwSignal::new(false);
 
+    let run_test = move || async move {
+        match tauri::test_connection(&url.get_untracked()).await {
+            Ok(h) => {
+                cert.set(false);
+                status.set(Some((
+                    true,
+                    format!("Verbindung steht. Server-Version {}.", h.server_version),
+                )));
+            }
+            Err(e) => {
+                cert.set(e.code == "untrusted_cert");
+                status.set(Some((false, e.message)));
+            }
+        }
+    };
     let test = move |_| {
         busy.set(true);
         status.set(None);
         spawn_local(async move {
-            match tauri::test_connection(&url.get_untracked()).await {
-                Ok(h) => status.set(Some((true, format!("Verbindung steht. Server-Version {}.", h.server_version)))),
+            run_test().await;
+            busy.set(false);
+        });
+    };
+    let install_ca = move |_| {
+        busy.set(true);
+        spawn_local(async move {
+            match tauri::install_server_ca(Some(&url.get_untracked())).await {
+                Ok(()) => run_test().await,
                 Err(e) => status.set(Some((false, e.message))),
             }
             busy.set(false);
@@ -48,7 +76,11 @@ pub fn SetupScreen() -> impl IntoView {
         });
     };
     let cancel = move |_| {
-        ctx.screen.set(if ctx.user.get_untracked().is_some() { Screen::Main } else { Screen::Login });
+        ctx.screen.set(if ctx.user.get_untracked().is_some() {
+            Screen::Main
+        } else {
+            Screen::Login
+        });
     };
 
     view! {
@@ -63,6 +95,9 @@ pub fn SetupScreen() -> impl IntoView {
             </div>
             {move || status.get().map(|(ok, text)| view! { <div class="msg" class:ok=ok class:err=!ok>{text}</div> })}
             <div class="row">
+                {move || cert.get().then(|| view! {
+                    <button class="btn" disabled=move || busy.get() on:click=install_ca>"Server-Zertifikat installieren"</button>
+                })}
                 <button class="btn secondary" disabled=move || busy.get() on:click=test>"Verbindung testen"</button>
                 <button class="btn" disabled=move || busy.get() on:click=save>"Speichern und weiter"</button>
                 {can_cancel.then(|| view! { <button class="btn secondary" on:click=cancel>"Abbrechen"</button> })}
@@ -153,7 +188,12 @@ pub fn MaintenanceScreen() -> impl IntoView {
 #[component]
 pub fn ForceUpdateScreen() -> impl IntoView {
     let ctx = expect_context::<Ctx>();
-    let min = move || ctx.health.get().and_then(|h| h.min_client_version).unwrap_or_default();
+    let min = move || {
+        ctx.health
+            .get()
+            .and_then(|h| h.min_client_version)
+            .unwrap_or_default()
+    };
     view! {
         <div class="center"><div class="card wide">
             <Brand/>
@@ -169,11 +209,25 @@ pub fn ForceUpdateScreen() -> impl IntoView {
 #[component]
 pub fn UnreachableScreen() -> impl IntoView {
     let ctx = expect_context::<Ctx>();
+    let install_ca = move |_| {
+        spawn_local(async move {
+            match tauri::install_server_ca(None).await {
+                Ok(()) => start(ctx).await,
+                Err(e) => ctx.fatal.set(e),
+            }
+        });
+    };
     view! {
         <div class="center"><div class="card">
             <Brand/>
             <h1>"Server nicht erreichbar"</h1>
-            <div class="msg err">{move || ctx.fatal.get()}</div>
+            <div class="msg err">{move || ctx.fatal.get().message}</div>
+            {move || (ctx.fatal.get().code == "untrusted_cert").then(|| view! {
+                <p class="muted">"Windows fragt gleich nach. Der angezeigte Fingerabdruck (SHA-1) muss mit dem auf der Startseite des Servers übereinstimmen."</p>
+                <div class="row">
+                    <button class="btn" on:click=install_ca>"Server-Zertifikat installieren"</button>
+                </div>
+            })}
             <div class="row">
                 <button class="btn" on:click=move |_| { spawn_local(start(ctx)); }>"Erneut versuchen"</button>
                 <button class="btn secondary" on:click=move |_| ctx.screen.set(Screen::Setup)>"Server ändern"</button>

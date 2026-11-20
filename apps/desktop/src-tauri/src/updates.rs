@@ -31,7 +31,10 @@ fn upd_err(e: impl std::fmt::Display) -> ApiError {
 
 /// `Ok(None)`, wenn der Server 204 liefert (kein neueres Release).
 #[tauri::command]
-pub async fn check_update(app: AppHandle, state: State<'_, AppState>) -> CmdResult<Option<UpdateInfo>> {
+pub async fn check_update(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> CmdResult<Option<UpdateInfo>> {
     let base = require_server(&app)?;
     let url = Url::parse(&format!("{base}{ENDPOINT_PATH}")).map_err(upd_err)?;
     let updater = app
@@ -59,7 +62,12 @@ pub async fn install_update(app: AppHandle, state: State<'_, AppState>) -> CmdRe
         .lock()
         .expect("Mutex vergiftet")
         .take()
-        .ok_or_else(|| err("update", "Es wurde kein Update gefunden. Bitte erneut nach Updates suchen."))?;
+        .ok_or_else(|| {
+            err(
+                "update",
+                "Es wurde kein Update gefunden. Bitte erneut nach Updates suchen.",
+            )
+        })?;
 
     let mut downloaded: u64 = 0;
     let handle = app.clone();

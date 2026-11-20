@@ -75,7 +75,7 @@ Die Apps fragen beim Start und über „Nach Updates suchen“ (Einstellungen) `
 
 | Pfad | Inhalt |
 |---|---|
-| `src-tauri/src/main.rs` | Commands: `app_info`, `test_connection`, `save_server_url`, `health`, `login`, `logout`, `me`, `chat` |
+| `src-tauri/src/main.rs` | Commands: `app_info`, `test_connection`, `install_server_ca`, `save_server_url`, `health`, `login`, `logout`, `me`, `chat` |
 | `src-tauri/src/net.rs` | HTTP zum Coordinator (reqwest, Windows-Zertifikatsspeicher), Server-URL und Token im Store |
 | `src-tauri/src/updates.rs` | Commands `check_update`, `install_update` (Event `update-progress`) |
 | `ui/src/state.rs` | Zustand, Health-Schleife (30 s), Start-Ablauf |
@@ -83,7 +83,9 @@ Die Apps fragen beim Start und über „Nach Updates suchen“ (Einstellungen) `
 | `ui/src/shell.rs`, `chat.rs`, `updates.rs` | Hauptansicht, Chat, Update-Anzeige |
 | `ui/src/tauri.rs` | Typisierte Aufrufe der Commands |
 
-Die Server-Adresse (Standard `https://gala-coordinator`) und der Anmelde-Token liegen im Tauri-Store `settings.json` im App-Datenverzeichnis. Die interne CA des Servers muss im Windows-Zertifikatsspeicher installiert sein (Download auf der Startseite des Coordinators).
+Die Server-Adresse (Standard `https://gala-coordinator`) und der Anmelde-Token liegen im Tauri-Store `settings.json` im App-Datenverzeichnis.
+
+Die interne CA des Servers muss im Windows-Zertifikatsspeicher liegen. Meldet Schannel „Stammzertifikat nicht vertrauenswürdig“ (Fehlercode `untrusted_cert`), bietet die App „Server-Zertifikat installieren“ an: Sie lädt `/ca.crt` (ohne Kettenprüfung) und ruft `certutil -user -addstore Root` auf. Windows fragt dabei mit dem SHA-1-Fingerabdruck nach; derselbe steht auf der Startseite des Coordinators. Es wird nur der Speicher des angemeldeten Nutzers geändert, Adminrechte sind nicht nötig.
 
 ## Offene Punkte
 

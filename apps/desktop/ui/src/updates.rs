@@ -12,11 +12,21 @@ fn mb(bytes: u64) -> String {
 #[component]
 pub fn UpdatePanel(#[prop(optional)] auto_check: bool) -> impl IntoView {
     let ctx = expect_context::<Ctx>();
-    if auto_check && matches!(ctx.update.get_untracked(), UpdateState::Idle | UpdateState::UpToDate) {
+    if auto_check
+        && matches!(
+            ctx.update.get_untracked(),
+            UpdateState::Idle | UpdateState::UpToDate
+        )
+    {
         spawn_local(check_update(ctx));
     }
 
-    let busy = move || matches!(ctx.update.get(), UpdateState::Checking | UpdateState::Downloading(..));
+    let busy = move || {
+        matches!(
+            ctx.update.get(),
+            UpdateState::Checking | UpdateState::Downloading(..)
+        )
+    };
 
     view! {
         <div>

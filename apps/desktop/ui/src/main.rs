@@ -1,4 +1,4 @@
-﻿//! GaLa-AI Desktop-Oberflaeche (Leptos CSR). Haengt die App ein und waehlt die Ansicht je nach Zustand.
+//! GaLa-AI Desktop-Oberflaeche (Leptos CSR). Haengt die App ein und waehlt die Ansicht je nach Zustand.
 
 mod chat;
 mod screens;
@@ -10,7 +10,9 @@ mod updates;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 
-use screens::{BootScreen, ForceUpdateScreen, LoginScreen, MaintenanceScreen, SetupScreen, UnreachableScreen};
+use screens::{
+    BootScreen, ForceUpdateScreen, LoginScreen, MaintenanceScreen, SetupScreen, UnreachableScreen,
+};
 use shell::Shell;
 use state::{Ctx, Screen, UpdateState, health_loop, start};
 

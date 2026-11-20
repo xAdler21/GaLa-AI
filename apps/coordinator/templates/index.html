@@ -26,6 +26,8 @@
     <h2>Hinweise zur Installation</h2>
     <p>Die App spricht ausschließlich mit diesem Server. Damit Windows der Verbindung vertraut, muss einmalig das Zertifikat der internen Zertifizierungsstelle installiert sein.</p>
     {% if has_ca %}
+    <p>Die App bietet das beim ersten Start selbst an („Server-Zertifikat installieren“). Windows zeigt dabei einen Fingerabdruck; er muss mit diesem übereinstimmen:</p>
+    {% if let Some(fp) = ca_sha1 %}<p><code>{{ fp }}</code></p>{% endif %}
     <p><a class="button secondary" href="/ca.crt">CA-Zertifikat herunterladen</a></p>
     {% endif %}
   </section>

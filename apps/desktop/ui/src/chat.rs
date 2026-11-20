@@ -17,7 +17,10 @@ fn history(ctx: Ctx) -> Vec<ChatTurn> {
         .get_untracked()
         .into_iter()
         .filter_map(|e| match e.state.get_untracked() {
-            ChatState::Done(r) => Some(ChatTurn { question: e.question.get_value(), answer: r.answer }),
+            ChatState::Done(r) => Some(ChatTurn {
+                question: e.question.get_value(),
+                answer: r.answer,
+            }),
             _ => None,
         })
         .collect()
@@ -26,7 +29,9 @@ fn history(ctx: Ctx) -> Vec<ChatTurn> {
 fn ask(ctx: Ctx, question: String) {
     let hist = history(ctx);
     let entry = ChatEntry {
-        id: ctx.chat.with_untracked(|c| c.last().map_or(0, |e| e.id + 1)),
+        id: ctx
+            .chat
+            .with_untracked(|c| c.last().map_or(0, |e| e.id + 1)),
         question: StoredValue::new(question.clone()),
         state: RwSignal::new(ChatState::Pending),
     };
@@ -53,7 +58,12 @@ pub fn ChatPage() -> impl IntoView {
     let input = RwSignal::new(String::new());
     let scroller = NodeRef::<html::Div>::new();
 
-    let pending = move || ctx.chat.get().iter().any(|e| e.state.get() == ChatState::Pending);
+    let pending = move || {
+        ctx.chat
+            .get()
+            .iter()
+            .any(|e| e.state.get() == ChatState::Pending)
+    };
     let send = move || {
         let q = input.get_untracked().trim().to_owned();
         if q.is_empty() || pending() {

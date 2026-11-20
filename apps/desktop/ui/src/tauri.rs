@@ -11,7 +11,8 @@ extern "C" {
     async fn invoke(cmd: &str, args: JsValue) -> Result<JsValue, JsValue>;
 
     #[wasm_bindgen(js_namespace = ["window", "__TAURI__", "event"], catch)]
-    async fn listen(event: &str, handler: &Closure<dyn FnMut(JsValue)>) -> Result<JsValue, JsValue>;
+    async fn listen(event: &str, handler: &Closure<dyn FnMut(JsValue)>)
+    -> Result<JsValue, JsValue>;
 }
 
 pub type Res<T> = Result<T, ApiError>;
@@ -44,15 +45,23 @@ fn js_err(v: JsValue) -> ApiError {
         return e;
     }
     let message = v.as_string().unwrap_or_else(|| format!("{v:?}"));
-    ApiError { code: "internal".into(), message }
+    ApiError {
+        code: "internal".into(),
+        message,
+    }
 }
 
 async fn call<A: Serialize, R: DeserializeOwned>(cmd: &str, args: &A) -> Res<R> {
     let ser = serde_wasm_bindgen::Serializer::json_compatible();
-    let args = args.serialize(&ser).map_err(|e| ApiError { code: "internal".into(), message: e.to_string() })?;
+    let args = args.serialize(&ser).map_err(|e| ApiError {
+        code: "internal".into(),
+        message: e.to_string(),
+    })?;
     let out = invoke(cmd, args).await.map_err(js_err)?;
-    serde_wasm_bindgen::from_value(out)
-        .map_err(|e| ApiError { code: "internal".into(), message: format!("Antwort nicht lesbar: {e}") })
+    serde_wasm_bindgen::from_value(out).map_err(|e| ApiError {
+        code: "internal".into(),
+        message: format!("Antwort nicht lesbar: {e}"),
+    })
 }
 
 /// Leere Argumente als `{}` (nicht `null`).
@@ -100,8 +109,18 @@ pub async fn me() -> Res<UserInfo> {
 
 pub async fn chat(question: &str, history: Vec<ChatTurn>) -> Res<ChatResponse> {
     // `ChatRequest` aus api-types dient nur als Form; der Command nimmt die Felder einzeln.
-    let ChatRequest { question, history } = ChatRequest { question: question.to_owned(), history };
-    call("chat", &ChatArgs { question: &question, history: &history }).await
+    let ChatRequest { question, history } = ChatRequest {
+        question: question.to_owned(),
+        history,
+    };
+    call(
+        "chat",
+        &ChatArgs {
+            question: &question,
+            history: &history,
+        },
+    )
+    .await
 }
 
 #[derive(Serialize)]
@@ -121,7 +140,8 @@ pub async fn install_update() -> Res<()> {
 /// Meldet den Download-Fortschritt (`downloaded`, `total`) waehrend `install_update`.
 pub fn on_update_progress(cb: impl Fn(u64, Option<u64>) + 'static) {
     let closure = Closure::<dyn FnMut(JsValue)>::new(move |ev: JsValue| {
-        let payload = js_sys::Reflect::get(&ev, &JsValue::from_str("payload")).unwrap_or(JsValue::UNDEFINED);
+        let payload =
+            js_sys::Reflect::get(&ev, &JsValue::from_str("payload")).unwrap_or(JsValue::UNDEFINED);
         if let Ok(p) = serde_wasm_bindgen::from_value::<Progress>(payload) {
             cb(p.downloaded, p.total);
         }
@@ -130,4 +150,14 @@ pub fn on_update_progress(cb: impl Fn(u64, Option<u64>) + 'static) {
         let _ = listen("update-progress", &closure).await;
         closure.forget();
     });
+}
+
+#[derive(Serialize)]
+struct OptUrlArg<'a> {
+    url: Option<&'a str>,
+}
+
+/// Uebernimmt das CA-Zertifikat des Servers (`None`: gespeicherte Adresse).
+pub async fn install_server_ca(url: Option<&str>) -> Res<()> {
+    call("install_server_ca", &OptUrlArg { url }).await
 }

@@ -15,6 +15,8 @@ pub struct IndexTemplate {
     pub notes: String,
     pub pub_date: Option<String>,
     pub has_ca: bool,
+    /// SHA-1-Fingerabdruck der CA, wie ihn der Windows-Dialog beim Installieren zeigt.
+    pub ca_sha1: Option<String>,
 }
 
 #[derive(Template)]
@@ -145,6 +147,7 @@ mod tests {
             notes: String::new(),
             pub_date: None,
             has_ca: false,
+            ca_sha1: None,
         }
         .render()
         .unwrap();
@@ -160,6 +163,7 @@ mod tests {
             notes: "<script>alert(1)</script>".into(),
             pub_date: Some("01.01.2026 10:00 UTC".into()),
             has_ca: true,
+            ca_sha1: Some("5711 50EF".into()),
         }
         .render()
         .unwrap();

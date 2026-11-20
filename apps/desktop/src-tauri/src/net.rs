@@ -17,7 +17,10 @@ const KEY_TOKEN: &str = "token";
 pub type CmdResult<T> = Result<T, ApiError>;
 
 pub fn err(code: &str, message: impl Into<String>) -> ApiError {
-    ApiError { code: code.to_owned(), message: message.into() }
+    ApiError {
+        code: code.to_owned(),
+        message: message.into(),
+    }
 }
 
 pub fn build_client() -> Client {
@@ -41,7 +44,10 @@ pub fn normalize_url(raw: &str) -> CmdResult<String> {
     let url = reqwest::Url::parse(&s)
         .map_err(|_| err("invalid_url", "Die Server-Adresse ist ungueltig."))?;
     if !matches!(url.scheme(), "http" | "https") || url.host_str().is_none() {
-        return Err(err("invalid_url", "Die Server-Adresse muss mit https:// beginnen."));
+        return Err(err(
+            "invalid_url",
+            "Die Server-Adresse muss mit https:// beginnen.",
+        ));
     }
     Ok(s)
 }
@@ -61,6 +67,15 @@ fn net_err(e: reqwest::Error) -> ApiError {
         details.push(s.to_string());
         source = s.source();
     }
+    // Schannel: CERT_E_UNTRUSTEDROOT (0x800B0109). Die interne CA des Servers fehlt im
+    // Zertifikatsspeicher; die Oberflaeche bietet dann `install_server_ca` an.
+    if details.iter().any(|d| d.contains("-2146762487")) {
+        return err(
+            "untrusted_cert",
+            "Dieser PC vertraut dem Zertifikat des Servers noch nicht. \
+             Mit „Server-Zertifikat installieren“ wird es übernommen.",
+        );
+    }
     if !details.is_empty() {
         msg.push_str(" (");
         msg.push_str(&details.join(": "));
@@ -69,17 +84,81 @@ fn net_err(e: reqwest::Error) -> ApiError {
     err("network", msg)
 }
 
+/// Laedt das Stammzertifikat der internen CA (`/ca.crt`) und legt es per `certutil` im
+/// Speicher "Vertrauenswuerdige Stammzertifizierungsstellen" des angemeldeten Nutzers ab.
+/// Windows zeigt dabei einen eigenen Sicherheitsdialog mit dem Fingerabdruck; nur wenn der
+/// Nutzer ihn bestaetigt, wird das Zertifikat uebernommen. Der Download selbst kann die
+/// Kette noch nicht pruefen (deshalb gibt es ja den Fehler) - die Pruefung ist der Abgleich
+/// des Fingerabdrucks im Dialog mit der Startseite des Servers.
+pub async fn install_server_ca(base: &str) -> CmdResult<()> {
+    let insecure = Client::builder()
+        .danger_accept_invalid_certs(true)
+        .connect_timeout(Duration::from_secs(8))
+        .timeout(Duration::from_secs(20))
+        .build()
+        .map_err(|e| err("internal", e.to_string()))?;
+    let resp = insecure
+        .get(format!("{base}/ca.crt"))
+        .send()
+        .await
+        .map_err(net_err)?;
+    if !resp.status().is_success() {
+        return Err(err(
+            "ca_missing",
+            format!(
+                "Der Server liefert kein Zertifikat (HTTP {}).",
+                resp.status()
+            ),
+        ));
+    }
+    let pem = resp.text().await.map_err(net_err)?;
+    if pem.len() > 16 * 1024 || !pem.trim_start().starts_with("-----BEGIN CERTIFICATE-----") {
+        return Err(err(
+            "ca_invalid",
+            "Die Antwort des Servers ist kein Zertifikat.",
+        ));
+    }
+    let path = std::env::temp_dir().join("gala-ai-server-ca.crt");
+    std::fs::write(&path, &pem).map_err(|e| err("internal", e.to_string()))?;
+
+    let mut cmd = std::process::Command::new("certutil");
+    cmd.args(["-user", "-addstore", "Root"]).arg(&path);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    let out = tauri::async_runtime::spawn_blocking(move || cmd.output())
+        .await
+        .map_err(|e| err("internal", e.to_string()))?;
+    let _ = std::fs::remove_file(&path);
+    match out {
+        Ok(o) if o.status.success() => Ok(()),
+        Ok(_) => Err(err(
+            "ca_declined",
+            "Das Zertifikat wurde nicht installiert (im Windows-Dialog abgelehnt?).",
+        )),
+        Err(e) => Err(err("internal", format!("certutil nicht ausführbar: {e}"))),
+    }
+}
+
 async fn parse<T: DeserializeOwned>(resp: Response) -> CmdResult<T> {
     let status = resp.status();
     if status.is_success() {
-        return resp
-            .json::<T>()
-            .await
-            .map_err(|e| err("bad_response", format!("Unerwartete Antwort vom Server: {e}")));
+        return resp.json::<T>().await.map_err(|e| {
+            err(
+                "bad_response",
+                format!("Unerwartete Antwort vom Server: {e}"),
+            )
+        });
     }
     let body = resp.text().await.unwrap_or_default();
     let mut e = serde_json::from_str::<ApiError>(&body).unwrap_or_else(|_| {
-        err(&format!("http_{}", status.as_u16()), format!("Unerwartete Antwort vom Server (HTTP {status})."))
+        err(
+            &format!("http_{}", status.as_u16()),
+            format!("Unerwartete Antwort vom Server (HTTP {status})."),
+        )
     });
     match status {
         StatusCode::UNAUTHORIZED => e.code = "unauthorized".to_owned(),
@@ -106,13 +185,17 @@ pub fn stored_token(app: &AppHandle) -> Option<String> {
 }
 
 pub fn save_server(app: &AppHandle, url: &str) -> CmdResult<()> {
-    let store = app.store(STORE_FILE).map_err(|e| err("store", e.to_string()))?;
+    let store = app
+        .store(STORE_FILE)
+        .map_err(|e| err("store", e.to_string()))?;
     store.set(KEY_SERVER, url);
     store.save().map_err(|e| err("store", e.to_string()))
 }
 
 pub fn save_token(app: &AppHandle, token: Option<&str>) -> CmdResult<()> {
-    let store = app.store(STORE_FILE).map_err(|e| err("store", e.to_string()))?;
+    let store = app
+        .store(STORE_FILE)
+        .map_err(|e| err("store", e.to_string()))?;
     match token {
         Some(t) => store.set(KEY_TOKEN, t),
         None => {
@@ -129,7 +212,12 @@ pub fn require_server(app: &AppHandle) -> CmdResult<String> {
 // --- Aufrufe ------------------------------------------------------------------------------
 
 pub async fn health(client: &Client, base: &str) -> CmdResult<HealthResponse> {
-    send(client.get(format!("{base}/api/v1/health")).timeout(Duration::from_secs(10))).await
+    send(
+        client
+            .get(format!("{base}/api/v1/health"))
+            .timeout(Duration::from_secs(10)),
+    )
+    .await
 }
 
 pub async fn post_json_anon<B: serde::Serialize, T: DeserializeOwned>(
@@ -151,7 +239,9 @@ pub async fn authed<T: DeserializeOwned>(
 ) -> CmdResult<T> {
     let base = require_server(app)?;
     let token = stored_token(app).ok_or_else(|| err("unauthorized", "Bitte anmelden."))?;
-    let mut req = client.request(method, format!("{base}/api/v1{path}")).bearer_auth(token);
+    let mut req = client
+        .request(method, format!("{base}/api/v1{path}"))
+        .bearer_auth(token);
     if let Some(b) = body {
         req = req.json(b);
     }

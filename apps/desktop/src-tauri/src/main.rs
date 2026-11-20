@@ -6,7 +6,9 @@
 mod net;
 mod updates;
 
-use api_types::client::{ChatRequest, ChatResponse, ChatTurn, HealthResponse, LoginRequest, LoginResponse, UserInfo};
+use api_types::client::{
+    ChatRequest, ChatResponse, ChatTurn, HealthResponse, LoginRequest, LoginResponse, UserInfo,
+};
 use net::{CmdResult, err};
 use reqwest::{Client, Method};
 use serde::Serialize;
@@ -41,6 +43,16 @@ async fn test_connection(state: State<'_, AppState>, url: String) -> CmdResult<H
     net::health(&state.http, &base).await
 }
 
+/// Uebernimmt das CA-Zertifikat des Servers (Adresse aus dem Feld, sonst die gespeicherte).
+#[tauri::command]
+async fn install_server_ca(app: AppHandle, url: Option<String>) -> CmdResult<()> {
+    let base = match url {
+        Some(u) => net::normalize_url(&u)?,
+        None => net::require_server(&app)?,
+    };
+    net::install_server_ca(&base).await
+}
+
 /// Speichert die Server-Adresse. Bei einer anderen Adresse wird der Token verworfen.
 #[tauri::command]
 fn save_server_url(app: AppHandle, url: String) -> CmdResult<String> {
@@ -67,7 +79,11 @@ async fn login(
 ) -> CmdResult<UserInfo> {
     let base = net::require_server(&app)?;
     let device_name = gethostname::gethostname().to_string_lossy().into_owned();
-    let req = LoginRequest { username: username.trim().to_owned(), password, device_name: Some(device_name) };
+    let req = LoginRequest {
+        username: username.trim().to_owned(),
+        password,
+        device_name: Some(device_name),
+    };
     let resp: LoginResponse = net::post_json_anon(&state.http, &base, "/auth/login", &req)
         .await
         .map_err(|mut e| {
@@ -106,7 +122,10 @@ async fn chat(
 }
 
 fn main() {
-    let state = AppState { http: net::build_client(), pending_update: std::sync::Mutex::new(None) };
+    let state = AppState {
+        http: net::build_client(),
+        pending_update: std::sync::Mutex::new(None),
+    };
     tauri::Builder::default()
         .plugin(tauri_plugin_store::Builder::new().build())
         .plugin(tauri_plugin_updater::Builder::new().build())
@@ -115,6 +134,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             app_info,
             test_connection,
+            install_server_ca,
             save_server_url,
             health,
             login,

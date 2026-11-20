@@ -58,7 +58,7 @@ pub struct Ctx {
     pub server: RwSignal<String>,
     pub user: RwSignal<Option<UserInfo>>,
     pub notice: RwSignal<Option<String>>,
-    pub fatal: RwSignal<String>,
+    pub fatal: RwSignal<ApiError>,
     pub update: RwSignal<UpdateState>,
     pub chat: RwSignal<Vec<ChatEntry>>,
 }
@@ -74,7 +74,10 @@ impl Ctx {
             server: RwSignal::new(String::new()),
             user: RwSignal::new(None),
             notice: RwSignal::new(None),
-            fatal: RwSignal::new(String::new()),
+            fatal: RwSignal::new(ApiError {
+                code: String::new(),
+                message: String::new(),
+            }),
             update: RwSignal::new(UpdateState::Idle),
             chat: RwSignal::new(Vec::new()),
         }
@@ -82,7 +85,10 @@ impl Ctx {
 
     /// Aktive Wartung laut letzter Health-Antwort.
     pub fn maintenance(&self) -> Option<MaintenanceInfo> {
-        self.health.get().map(|h| h.maintenance).filter(|m| m.enabled)
+        self.health
+            .get()
+            .map(|h| h.maintenance)
+            .filter(|m| m.enabled)
     }
 
     /// Server verlangt eine neuere App-Version, als wir haben.
@@ -102,7 +108,9 @@ impl Ctx {
         match e.code.as_str() {
             "unauthorized" => {
                 self.user.set(None);
-                self.notice.set(Some("Die Sitzung ist abgelaufen. Bitte erneut anmelden.".into()));
+                self.notice.set(Some(
+                    "Die Sitzung ist abgelaufen. Bitte erneut anmelden.".into(),
+                ));
                 self.screen.set(Screen::Login);
             }
             "maintenance" => {
@@ -129,7 +137,15 @@ pub async fn refresh_health(ctx: Ctx) {
 /// Dauerschleife: alle 30 s (waehrend Wartung alle 10 s) den Health-Endpunkt abfragen.
 pub async fn health_loop(ctx: Ctx) {
     loop {
-        let wait = if ctx.health.get_untracked().is_some_and(|h| h.maintenance.enabled) { 10_000 } else { 30_000 };
+        let wait = if ctx
+            .health
+            .get_untracked()
+            .is_some_and(|h| h.maintenance.enabled)
+        {
+            10_000
+        } else {
+            30_000
+        };
         TimeoutFuture::new(wait).await;
         if !ctx.server.get_untracked().is_empty() && ctx.screen.get_untracked() != Screen::Setup {
             refresh_health(ctx).await;
@@ -138,7 +154,10 @@ pub async fn health_loop(ctx: Ctx) {
 }
 
 pub async fn check_update(ctx: Ctx) {
-    if matches!(ctx.update.get_untracked(), UpdateState::Checking | UpdateState::Downloading(..)) {
+    if matches!(
+        ctx.update.get_untracked(),
+        UpdateState::Checking | UpdateState::Downloading(..)
+    ) {
         return;
     }
     ctx.update.set(UpdateState::Checking);
@@ -163,7 +182,7 @@ pub async fn start(ctx: Ctx) {
     let info = match tauri::app_info().await {
         Ok(i) => i,
         Err(e) => {
-            ctx.fatal.set(e.message);
+            ctx.fatal.set(e);
             ctx.screen.set(Screen::Unreachable);
             return;
         }
@@ -192,7 +211,7 @@ pub async fn start(ctx: Ctx) {
             // Wartung: Token ist vermutlich gueltig, ein 401 spaeter fuehrt zur Anmeldung.
             "maintenance" => ctx.screen.set(Screen::Main),
             _ => {
-                ctx.fatal.set(e.message);
+                ctx.fatal.set(e);
                 ctx.screen.set(Screen::Unreachable);
             }
         },

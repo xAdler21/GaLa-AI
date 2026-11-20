@@ -47,6 +47,9 @@ async fn index(State(state): State<AppState>) -> Response {
         notes: latest.map(|r| r.notes.clone()).unwrap_or_default(),
         pub_date: latest.and_then(|r| r.published_at).map(templates::fmt_dt),
         has_ca: state.cfg.ca_cert_path().is_file(),
+        ca_sha1: std::fs::read_to_string(state.cfg.ca_cert_path())
+            .ok()
+            .and_then(|p| ca_sha1(&p)),
     })
 }
 
@@ -111,4 +114,41 @@ async fn style() -> Response {
         include_str!("../static/style.css"),
     )
         .into_response()
+}
+
+/// SHA-1 über das DER des (ersten) Zertifikats in `pem`, in Vierergruppen wie im
+/// Windows-Sicherheitsdialog ("5711 50EF …"). `None`, wenn kein PEM-Zertifikat.
+fn ca_sha1(pem: &str) -> Option<String> {
+    use base64::Engine as _;
+    use sha1::Digest as _;
+    let body = pem
+        .split("-----BEGIN CERTIFICATE-----")
+        .nth(1)?
+        .split("-----END CERTIFICATE-----")
+        .next()?;
+    let b64: String = body.chars().filter(|c| !c.is_whitespace()).collect();
+    let der = base64::engine::general_purpose::STANDARD.decode(b64).ok()?;
+    let hex = hex::encode_upper(sha1::Sha1::digest(&der));
+    Some(
+        hex.as_bytes()
+            .chunks(4)
+            .map(|c| std::str::from_utf8(c).unwrap_or(""))
+            .collect::<Vec<_>>()
+            .join(" "),
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    /// Root-CA von gala-coordinator; SHA-1 laut certutil 57:11:50:EF:…:28:36.
+    const PEM: &str = "-----BEGIN CERTIFICATE-----MIIBozCCAUmgAwIBAgIQCL2Hu+yn+vJdpS2LtwfWfDAKBggqhkjOPQQDAjAwMS4wLAYDVQQDEyVDYWRkeSBMb2NhbCBBdXRob3JpdHkgLSAyMDI2IEVDQyBSb290MB4XDTI2MTExMDE3MDUwNloXDTM2MDkxODE3MDUwNlowMDEuMCwGA1UEAxMlQ2FkZHkgTG9jYWwgQXV0aG9yaXR5IC0gMjAyNiBFQ0MgUm9vdDBZMBMGByqGSM49AgEGCCqGSM49AwEHA0IABKg/NUIDdtv61eWF4LFyR4iY3hZVQ8fw7HkK8c4pciVZgT8kGCy0pmoIumwtTLQqAwqa6rQvjZ33Xw9hDmYMUrujRTBDMA4GA1UdDwEB/wQEAwIBBjASBgNVHRMBAf8ECDAGAQH/AgEBMB0GA1UdDgQWBBQcCERNawJORYSOSaklkfHyiVhDbTAKBggqhkjOPQQDAgNIADBFAiBLkxGUHpozXZfemVDRZFwEnAzmYOFnHei2z1uQ614NnQIhAPPsJts3SPk4h4HFOXk/sIgzPuUqg9roZq4wixG9CXTj-----END CERTIFICATE-----";
+
+    #[test]
+    fn ca_fingerprint() {
+        assert_eq!(
+            super::ca_sha1(PEM).as_deref(),
+            Some("5711 50EF 3A81 AB13 E953 44B7 6323 C0BB 1E90 2836")
+        );
+        assert_eq!(super::ca_sha1("kein Zertifikat"), None);
+    }
 }
