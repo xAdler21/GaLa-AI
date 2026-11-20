@@ -70,7 +70,7 @@ async fn health(State(state): State<AppState>) -> Result<Json<HealthResponse>, A
         .and_then(|v| v.as_str().map(str::to_string))
         .filter(|s| !s.is_empty());
     Ok(Json(HealthResponse {
-        server_version: env!("CARGO_PKG_VERSION").to_string(),
+        server_version: crate::config::server_version(),
         maintenance: MaintenanceInfo {
             enabled: m.enabled,
             message: m.message,

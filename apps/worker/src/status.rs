@@ -24,9 +24,9 @@ pub struct WorkerInfo {
     pub ocr_device: Option<String>,
 }
 
-/// Commit, aus dem das Image gebaut wurde (setzt das Dockerfile als `GALA_BUILD_REV`).
-fn build_rev() -> Option<String> {
-    std::env::var("GALA_BUILD_REV")
+/// Versionsnummer des Images (setzt das Dockerfile als `GALA_VERSION`, z. B. `0.1.12`).
+fn version() -> Option<String> {
+    std::env::var("GALA_VERSION")
         .ok()
         .map(|v| v.trim().to_string())
         .filter(|v| !v.is_empty())
@@ -41,7 +41,7 @@ pub fn spawn(
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         let started_at: DateTime<Utc> = Utc::now();
-        let rev = build_rev();
+        let rev = version();
         if let Err(err) = index_status::prune_workers(&pool, PRUNE_DAYS).await {
             tracing::warn!(%err, "Alte Worker-Einträge konnten nicht entfernt werden");
         }

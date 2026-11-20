@@ -104,6 +104,16 @@ impl Config {
     }
 }
 
+/// Versionsnummer dieses Servers: `GALA_VERSION` aus dem Image (setzt die CI, z. B. `0.1.12`),
+/// sonst die Paketversion (lokaler Build).
+pub fn server_version() -> String {
+    std::env::var("GALA_VERSION")
+        .ok()
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+        .unwrap_or_else(|| env!("CARGO_PKG_VERSION").to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -54,7 +54,7 @@ Die DTOs stehen in `crates/api-types/src/client.rs` und sind die einzige Quelle 
 - **Updater-Abfrage:** `GET /api/v1/updates/{target}/{arch}/{current_version}`.
   - `204`, wenn kein neueres veröffentlichtes Release existiert.
   - Sonst `200` mit `{version, notes, pub_date, url, signature}`.
-- **Releases:** Im Admin-Panel werden Version, Notizen, `*-setup.exe` und der Inhalt der `.sig` hochgeladen.
+- **Releases:** Im Admin-Panel werden Version, Notizen, `*-setup.exe` und der Inhalt der `.sig` hochgeladen, oder per SSH mit `coordinator release add --version --installer --signature [--notes] [--publish]` (im Container, Dateien unter `$GALA_DATA_DIR`). Gebaut wird mit `apps/desktop/build-release.ps1`, signiert mit `%USERPROFILE%/.tauri/gala-updater.key` (ohne Passwort, nicht im Repo).
   - Ablage: `$GALA_DATA_DIR/releases/<version>/`.
   - Erst nach „Veröffentlichen“ sichtbar.
 - **Downloads:**
@@ -84,8 +84,8 @@ Jede VM hat den Linux-Nutzer `claude` mit sudo (NOPASSWD). Den Schlüssel liefer
 - **Wartungsmodus beenden:** `POST http://gala-coordinator:8081/internal/maintenance` mit Header `X-Gala-Internal-Token: $GALA_INTERNAL_TOKEN` und Body `{"enabled": false}`.
 
 ### Images
-- **Bauen:** `.github/workflows/images.yml` baut bei jedem Push auf `main` `coordinator`, `worker-cpu`, `worker-vision` und `bench`, testet sie und legt sie als `ghcr.io/<besitzer>/<repo>/<name>:<commit-sha>` ab (zusätzlich Tag `main`).
-- **Bereitstellen:** `deploy/common/images.sh <coordinator|ocr> <commit-sha>` lädt die Images des Commits (oder baut lokal) und schreibt `/etc/gala/image.env` mit `GALA_IMAGE_REPO`, `GALA_IMAGE_TAG`, `GALA_BUILD_REV`. `dc.sh` reicht die Datei an compose weiter; ohne sie gelten `gala/<name>:local`.
+- **Bauen:** `.github/workflows/images.yml` baut bei jedem Push auf `main` `coordinator`, `worker-cpu`, `worker-vision` und `bench`, testet sie und legt sie als `ghcr.io/<besitzer>/<repo>/<name>:<commit-sha>` ab (zusätzlich die Tags `main` und die Versionsnummer `<major>.<minor>.<lauf>`, z. B. `0.1.12`: major.minor aus `[workspace.package]` in `Cargo.toml`, lauf = Nummer des Workflow-Laufs). Sind alle Images oben, setzt der Workflow das Git-Tag `v0.1.12`. Im Admin-Panel wird per Versionsnummer (oder `main`) aktualisiert; angezeigt werden nur Versionsnummern, keine Commit-Hashes.
+- **Bereitstellen:** `deploy/common/images.sh <coordinator|ocr> <commit-sha>` lädt die Images des Commits (oder baut lokal) und schreibt `/etc/gala/image.env` mit `GALA_IMAGE_REPO`, `GALA_IMAGE_TAG`, `GALA_VERSION`. `dc.sh` reicht die Datei an compose weiter; ohne sie gelten `gala/<name>:local`.
 - **Einstellungen** in `/etc/gala/hosts.env`: `GALA_IMAGE_SOURCE` = `registry` (Standard) oder `build`, `GALA_IMAGE_REGISTRY`, `GALA_IMAGE_WAIT_MIN`.
 - `update.sh` und `install.sh` bauen nicht selbst, sondern rufen `images.sh` auf.
 
@@ -109,7 +109,7 @@ Jede VM hat den Linux-Nutzer `claude` mit sudo (NOPASSWD). Den Schlüssel liefer
 | `PDFIUM_DIR` | worker | Ordner mit libpdfium, falls nicht systemweit installiert |
 | `GALA_OCR_DEVICE` | worker (vision) | `cpu` (Standard, in `deploy/ocr/compose.yml` fest gesetzt). `cuda` nur mit Feature `worker/cuda` |
 | `GALA_WORKER_NAME` | worker | Name in `index_task.worker` und `worker_status`, Standard Hostname. Die compose-Dateien setzen feste Namen |
-| `GALA_BUILD_REV` | worker | Commit des Images (setzt das Dockerfile), erscheint im Admin-Panel |
+| `GALA_VERSION` | coordinator, worker | Versionsnummer des Images, z. B. `0.1.12` (setzt die CI per Build-Argument), erscheint im Admin-Panel. Lokale Builds: `<Cargo-Version>-lokal` |
 
 ### Cargo-Features
 - `coordinator/embed`: Dokumenten-Chatbot (Frage-Embeddings per fastembed). Ohne das Feature antwortet `POST /api/v1/chat` mit 501. Im Docker-Image ist es standardmäßig an (`GALA_COORDINATOR_FEATURES`).

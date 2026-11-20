@@ -44,7 +44,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "REPLACE_WITH_TAURI_SIGNING_PUBLIC_KEY",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEEzOUI4NUQ0NEQ3NjRBNDEKUldSQlNuWk4xSVdibzNsUzF0R3J0L3BHL0VVdm1RM0hyQ1YxNG9JR3Jrb1Ira21UM2d3ODRxV1EK",
       "windows": {
         "installMode": "passive"
       }

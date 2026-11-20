@@ -17,7 +17,7 @@ services:
         # trixie: die vorgebaute ONNX Runtime braucht glibc >= 2.38 (siehe worker.Dockerfile)
         BUILD_IMAGE: ${GALA_WORKER_BUILD_IMAGE:-rust:1-trixie}
         RUNTIME_IMAGE: ${GALA_WORKER_RUNTIME_IMAGE:-debian:trixie-slim}
-        GALA_BUILD_REV: ${GALA_BUILD_REV:-}
+        GALA_VERSION: ${GALA_VERSION:-}
     # Registry-Image eines Commits oder lokal gebaut: deploy/common/images.sh
     image: ${GALA_IMAGE_REPO:-gala}/worker-vision:${GALA_IMAGE_TAG:-local}
     container_name: gala-worker-vision

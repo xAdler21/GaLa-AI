@@ -5,6 +5,7 @@
 {% block body %}
 <header class="topbar">
   <strong>GaLa-AI Administration</strong>
+  <span class="muted">Version {{ server_version }}</span>
   <span class="spacer"></span>
   <span class="muted">{{ username }}</span>
   <form method="post" action="/admin/logout" class="inline"><button type="submit" class="secondary small">Abmelden</button></form>
@@ -64,8 +65,9 @@
 
   <section class="card" id="update">
     <h2>Server-Update</h2>
+    <p>Installiert: <strong>{{ server_version }}</strong></p>
     <form method="post" action="/admin/update" class="stack">
-      <label>Git-Referenz (Branch, Tag oder Commit)
+      <label>Version (z. B. 0.1.12) oder <code>main</code> für die neueste
         <input name="git_ref" value="main" required maxlength="100" pattern="[A-Za-z0-9._/\-]+">
       </label>
       <label class="check">

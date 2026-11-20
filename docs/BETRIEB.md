@@ -153,10 +153,17 @@ sudo /opt/gala/deploy/common/dc.sh coordinator exec coordinator coordinator admi
 
 Danach Anmeldung im Admin-Panel unter `https://gala-coordinator/admin`. Ohne DNS-Eintrag geht auch die IP (`https://10.10.0.235/admin`); dann `GALA_PUBLIC_URL` in `coordinator.env` auf die IP setzen, damit Download- und Update-URLs stimmen.
 
-### 2.7 Erstes Desktop-Release
+### 2.7 Desktop-Release
 
-1. Desktop-Installer (`*-setup.exe`) und die `.sig` auf einem Entwickler-PC bauen (Tauri, signiert).
-2. Im Admin-Panel unter „Desktop-Releases“ hochladen: Version, Notizen, `*-setup.exe`, Inhalt der `.sig`, dann „Veröffentlichen“.
+1. Auf dem Entwickler-PC bauen: `.\apps\desktop\build-release.ps1 -Version 0.2.0` (setzt die Version in `apps/desktop/Cargo.toml`, baut den NSIS-Installer und signiert ihn mit `%USERPROFILE%\.tauri\gala-updater.key`). Den Schlüssel sichern: ohne ihn lassen sich installierte Apps nicht mehr aktualisieren.
+2. Hochladen, entweder im Admin-Panel unter „Desktop-Releases“ (Version, Notizen, `*-setup.exe`, Inhalt der `.sig`, dann „Veröffentlichen“) oder per SSH auf gala-coordinator:
+   ```bash
+   sudo install -d -o gala -g gala /srv/gala/data/import
+   # *-setup.exe und .sig nach /srv/gala/data/import kopieren (scp), dann:
+   sudo /opt/gala/deploy/common/dc.sh coordinator exec coordinator coordinator release add \
+     --version 0.2.0 --installer /srv/gala/data/import/GaLa-AI_0.2.0_x64-setup.exe \
+     --signature /srv/gala/data/import/GaLa-AI_0.2.0_x64-setup.exe.sig --notes "…" --publish
+   ```
 3. Auf der Startseite `https://gala-coordinator/` lassen sich Installer und CA-Zertifikat herunterladen. Das CA-Zertifikat (`ca.crt`) muss auf den Windows-Clients in „Vertrauenswürdige Stammzertifizierungsstellen“ installiert werden, sonst vertraut die App dem Server nicht.
 
 ## 3. Admin-Panel: Schalter im Hintergrund
@@ -237,6 +244,8 @@ Auf den VMs stellt `deploy/common/images.sh <vm> <commit>` die Images bereit und
 | `GALA_IMAGE_SOURCE` | `registry` (Standard): Images laden. `build`: die VM baut selbst aus `/opt/gala` (viel Platz und Zeit; nötig ohne Zugang zur Registry oder mit abweichenden Features, z. B. Coordinator ohne `embed`). |
 | `GALA_IMAGE_REGISTRY` | Standard `ghcr.io/<besitzer>/<repo>`, abgeleitet vom git-Remote `origin` |
 | `GALA_IMAGE_WAIT_MIN` | So lange wartet ein Update auf Images, die die CI noch baut (Standard 30). Ein Lauf dauert etwa 15 Minuten. |
+
+**Versionsnummern.** Jeder Lauf des Workflows bekommt eine Nummer `<major>.<minor>.<lauf>`, z. B. `0.1.12` (major.minor aus `[workspace.package]` in `Cargo.toml`, für einen Versionssprung dort ändern). Sie steckt in jedem Image (`GALA_VERSION`, Tag `:0.1.12`), erscheint oben im Admin-Panel und bei den Workern, und der Commit bekommt das Git-Tag `v0.1.12`. Im Feld „Version“ des Server-Updates lässt sich so eine bestimmte Version eintragen (auch zum Zurückgehen) oder `main` für die neueste.
 
 Ablauf einer Änderung: Commit nach `main` pushen → Workflow „Images“ läuft → im Admin-Panel „Update starten“. Wer das Update sofort nach dem Push startet, sieht im Log „Noch nicht ladbar (baut die CI noch?)“, bis die Images da sind.
 

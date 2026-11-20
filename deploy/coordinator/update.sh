@@ -106,7 +106,8 @@ main() {
 
   step "Ref $REF auflösen und auschecken"
   commit=""
-  for cand in "origin/$REF" "refs/tags/$REF" "$REF"; do
+  # Versionsnummern (0.1.12) sind Git-Tags v0.1.12, die die CI setzt.
+  for cand in "origin/$REF" "refs/tags/v$REF" "refs/tags/$REF" "$REF"; do
     if commit=$(g rev-parse --verify --quiet "${cand}^{commit}"); then
       break
     fi
@@ -203,7 +204,7 @@ main() {
 
   step "Fertig"
   trap - ERR
-  write_status succeeded "Update auf $(g rev-parse --short "$commit") abgeschlossen" \
+  write_status succeeded "Update auf Version $(sed -n 's/^GALA_VERSION=//p' /etc/gala/image.env 2>/dev/null || g rev-parse --short "$commit") abgeschlossen" \
     "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 }
 

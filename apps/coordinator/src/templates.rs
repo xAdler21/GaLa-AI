@@ -107,6 +107,8 @@ pub struct IndexStatusView {
 #[template(path = "dashboard.html")]
 pub struct DashboardTemplate {
     pub username: String,
+    /// Versionsnummer des Servers (`config::server_version`).
+    pub server_version: String,
     pub flash: Option<String>,
     pub error: Option<String>,
     pub maintenance: MaintenanceView,
@@ -181,6 +183,7 @@ mod tests {
     fn dashboard_renders() {
         let t = DashboardTemplate {
             username: "admin".into(),
+            server_version: "0.1.12".into(),
             flash: Some("Gespeichert".into()),
             error: None,
             maintenance: MaintenanceView {
@@ -225,7 +228,7 @@ mod tests {
                     name: "gala-ocr-vision".into(),
                     role: "vision".into(),
                     device: "cuda:0".into(),
-                    build_rev: "97fde6a".into(),
+                    build_rev: "0.1.12".into(),
                     started_at: "11.11.2026 08:00 UTC".into(),
                     last_seen: "11.11.2026 08:05 UTC".into(),
                     alive: true,

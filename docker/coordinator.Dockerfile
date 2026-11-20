@@ -47,4 +47,7 @@ ENV GALA_BIND=0.0.0.0:8080 \
     GALA_STATE_DIR=/var/lib/gala/state \
     GALA_EMBED_CACHE_DIR=/srv/gala/data/models/fastembed
 EXPOSE 8080 8081
+# Versionsnummer des Builds (setzt die CI, z. B. 0.1.12), erscheint im Admin-Panel.
+ARG GALA_VERSION=""
+ENV GALA_VERSION=${GALA_VERSION}
 ENTRYPOINT ["coordinator"]

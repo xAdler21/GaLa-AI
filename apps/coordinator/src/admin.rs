@@ -378,6 +378,7 @@ async fn build_dashboard(
     let index = index_status::load(state).await?;
     Ok(DashboardTemplate {
         username: admin.username.clone(),
+        server_version: crate::config::server_version(),
         flash: flash.msg.filter(|s| !s.is_empty()),
         error: flash.err.filter(|s| !s.is_empty()),
         maintenance: MaintenanceView {

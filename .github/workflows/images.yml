@@ -7,7 +7,10 @@ name: Images
 #   ghcr.io/<besitzer>/<repo>/worker-cpu:<commit-sha>
 #   ghcr.io/<besitzer>/<repo>/worker-vision:<commit-sha>
 #   ghcr.io/<besitzer>/<repo>/bench:<commit-sha>
-# Zusätzlich jeweils das Tag "main".
+# Zusätzlich jeweils die Tags "main" und die Versionsnummer <major>.<minor>.<lauf>
+# (major.minor aus [workspace.package] in Cargo.toml, lauf = Nummer dieses Workflow-Laufs),
+# z. B. 0.1.12. Nach erfolgreichem Hochladen aller Images bekommt der Commit das Git-Tag
+# v0.1.12; im Admin-Panel lässt sich so per Versionsnummer aktualisieren.
 #
 # Bewusst schlichte docker-Befehle statt build-push-action: das Bench-Image setzt
 # auf dem lokal gebauten Worker-Image auf (FROM), das geht nur im Docker-Daemon
@@ -51,6 +54,10 @@ jobs:
           repo="ghcr.io/${GITHUB_REPOSITORY,,}"
           echo "REPO=$repo" >>"$GITHUB_ENV"
           echo "IMAGE=$repo/${{ matrix.name }}" >>"$GITHUB_ENV"
+          # major.minor aus Cargo.toml, dazu die fortlaufende Nummer dieses Laufs
+          mm=$(sed -n 's/^version = "\([0-9]*\.[0-9]*\)\..*"/\1/p' Cargo.toml | head -n1)
+          [ -n "$mm" ] || { echo "::error::Keine Version in Cargo.toml"; exit 1; }
+          echo "VERSION=$mm.${{ github.run_number }}" >>"$GITHUB_ENV"
 
       - name: Bauen
         run: |
@@ -59,10 +66,11 @@ jobs:
             args+=(--build-arg "$a")
           done
           docker build -f "${{ matrix.dockerfile }}" "${args[@]}" \
-            --build-arg "GALA_BUILD_REV=${GITHUB_SHA::7}" \
+            --build-arg "GALA_VERSION=$VERSION" \
+            --label "org.opencontainers.image.version=$VERSION" \
             --label "org.opencontainers.image.source=https://github.com/${GITHUB_REPOSITORY}" \
             --label "org.opencontainers.image.revision=${GITHUB_SHA}" \
-            -t "$IMAGE:$GITHUB_SHA" -t "$IMAGE:main" .
+            -t "$IMAGE:$GITHUB_SHA" -t "$IMAGE:main" -t "$IMAGE:$VERSION" .
 
       - name: "Test: Binary startet"
         run: docker run --rm "$IMAGE:$GITHUB_SHA" --help
@@ -86,7 +94,7 @@ jobs:
             --build-arg "WORKER_IMAGE=$IMAGE:$GITHUB_SHA" \
             --label "org.opencontainers.image.source=https://github.com/${GITHUB_REPOSITORY}" \
             --label "org.opencontainers.image.revision=${GITHUB_SHA}" \
-            -t "$REPO/bench:$GITHUB_SHA" -t "$REPO/bench:main" .
+            -t "$REPO/bench:$GITHUB_SHA" -t "$REPO/bench:main" -t "$REPO/bench:$VERSION" .
 
       - name: "Test: OCR (Modelle laden, Test-PDF erkennen)"
         if: matrix.name == 'worker-vision'
@@ -128,7 +136,26 @@ jobs:
           docker version --format 'Docker {{.Server.Version}}, Treiber {{.Server.Driver}}' || true
           push "$IMAGE:$GITHUB_SHA"
           push "$IMAGE:main"
+          push "$IMAGE:$VERSION"
           if [ "${{ matrix.name }}" = worker-vision ]; then
             push "$REPO/bench:$GITHUB_SHA"
             push "$REPO/bench:main"
+            push "$REPO/bench:$VERSION"
           fi
+
+  # Erst wenn alle Images oben sind: Commit mit der Versionsnummer markieren (v0.1.12).
+  # Das Admin-Panel aktualisiert per Versionsnummer auf genau diesen Commit.
+  tag:
+    needs: image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Git-Tag setzen
+        run: |
+          mm=$(sed -n 's/^version = "\([0-9]*\.[0-9]*\)\..*"/\1/p' Cargo.toml | head -n1)
+          tag="v$mm.${{ github.run_number }}"
+          git tag "$tag" "$GITHUB_SHA"
+          git push origin "refs/tags/$tag"
+          echo "Version $mm.${{ github.run_number }} = $tag" >>"$GITHUB_STEP_SUMMARY"

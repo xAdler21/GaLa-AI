@@ -43,29 +43,17 @@ cargo clippy -p gala-ai-desktop -- -D warnings
 
 Updates werden signiert; die App prüft die Signatur mit dem öffentlichen Schlüssel aus `tauri.conf.json`.
 
-1. Schlüsselpaar erzeugen, an einem sicheren Ort **außerhalb des Repos**, den Sie selbst wählen (nicht im Repo und nicht im NAS-Ordner `#VM-Keys`):
-
-   ```powershell
-   cargo tauri signer generate -w "<Pfad>\gala-updater.key"
-   ```
-
-   Das Passwort sichern Sie getrennt (Passwort-Manager). Geht der private Schlüssel verloren, kann keine bestehende Installation mehr aktualisiert werden.
-2. Der **öffentliche** Schlüssel (Inhalt von `gala-updater.key.pub`) kommt in `src-tauri/tauri.conf.json` unter `plugins.updater.pubkey`. Dort steht bisher der Platzhalter `REPLACE_WITH_TAURI_SIGNING_PUBLIC_KEY`. Ersetzen Sie ihn durch den kompletten Text der `.pub`-Datei und bauen Sie danach neu.
-3. Der private Schlüssel kommt nur über Umgebungsvariablen in den Build, nie in eine Datei im Repo:
-
-   ```powershell
-   $env:TAURI_SIGNING_PRIVATE_KEY = Get-Content "<Pfad>\gala-updater.key" -Raw
-   $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD = "<Passwort>"
-   ```
+- Der private Schlüssel liegt auf dem Build-PC unter `%USERPROFILE%\.tauri\gala-updater.key` (erzeugt am 20.11.2026 mit `cargo tauri signer generate`, **ohne Passwort**, wie bei Plintus). Er gehört nicht ins Repo. Eine Sicherung an einem zweiten Ort ist Pflicht: geht er verloren, kann keine installierte App mehr aktualisiert werden.
+- Der öffentliche Schlüssel (`gala-updater.key.pub`) steht in `src-tauri/tauri.conf.json` unter `plugins.updater.pubkey`.
+- Ein anderer Schlüsselpfad geht über `$env:GALA_UPDATER_KEY`.
 
 ## Installer bauen
 
 ```powershell
-cd apps\desktop\src-tauri
-cargo tauri build
+.\apps\desktop\build-release.ps1 -Version 0.2.0
 ```
 
-Das baut zuerst die Oberfläche (`trunk build --release`) und dann den NSIS-Installer. Ergebnis (unter `$env:CARGO_TARGET_DIR\release\bundle\nsis\`):
+Das Skript setzt die Version in `apps/desktop/Cargo.toml`, baut die Oberfläche (`trunk build --release`) und den NSIS-Installer und signiert ihn. Ergebnis (unter `%LOCALAPPDATA%\cargo-target\gala-desktop\release\bundle\nsis\`):
 
 - `GaLa-AI_<version>_x64-setup.exe`
 - `GaLa-AI_<version>_x64-setup.exe.sig`
@@ -74,7 +62,7 @@ Die Version steht in `apps/desktop/Cargo.toml` (`[workspace.package] version`). 
 
 ## Release veröffentlichen
 
-Im Admin-Panel des Coordinators unter „Desktop-Releases“ hochladen:
+Im Admin-Panel des Coordinators unter „Desktop-Releases“ hochladen (oder per SSH mit `coordinator release add`, siehe docs/BETRIEB.md 2.7):
 
 1. Version und Release-Notizen eintragen.
 2. Die Datei **`…-setup.exe`** auswählen.
@@ -99,5 +87,4 @@ Die Server-Adresse (Standard `https://gala-coordinator`) und der Anmelde-Token l
 
 ## Offene Punkte
 
-- Der Platzhalter für den Updater-Schlüssel muss vor dem ersten Release ersetzt werden.
 - Angebote sind ein Platzhalter („kommt mit M1“).

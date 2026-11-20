@@ -16,7 +16,7 @@
 #   GALA_IMAGE_REGISTRY   Standard: ghcr.io/<besitzer>/<repo> des git-Remotes origin
 #   GALA_IMAGE_WAIT_MIN   So lange auf Images warten, die die CI noch baut (Standard 30)
 #
-# Ergebnis: /etc/gala/image.env (GALA_IMAGE_REPO, GALA_IMAGE_TAG, GALA_BUILD_REV);
+# Ergebnis: /etc/gala/image.env (GALA_IMAGE_REPO, GALA_IMAGE_TAG, GALA_VERSION);
 # dc.sh reicht die Datei an docker compose weiter. Sie wird erst geschrieben, wenn
 # die Images wirklich da sind.
 set -euo pipefail
@@ -59,22 +59,24 @@ source_mode=$(setting GALA_IMAGE_SOURCE registry)
 wait_min=$(setting GALA_IMAGE_WAIT_MIN 30)
 registry=$(setting GALA_IMAGE_REGISTRY "$(default_registry)")
 
-write_image_env() { # <repo> <tag>
+write_image_env() { # <repo> <tag> <version>
   local tmp=/etc/gala/.image.env.$$
-  printf '# Von deploy/common/images.sh geschrieben (Stand: %s). Nicht von Hand ändern.\nGALA_IMAGE_REPO=%s\nGALA_IMAGE_TAG=%s\nGALA_BUILD_REV=%s\n' \
-    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$1" "$2" "${commit:0:7}" >"$tmp"
+  printf '# Von deploy/common/images.sh geschrieben (Stand: %s). Nicht von Hand ändern.\nGALA_IMAGE_REPO=%s\nGALA_IMAGE_TAG=%s\nGALA_VERSION=%s\n' \
+    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$1" "$2" "$3" >"$tmp"
   chmod 0644 "$tmp"
   mv -f "$tmp" /etc/gala/image.env
 }
 
-export GALA_BUILD_REV=${commit:0:7}
+# Lokale Builds: Paketversion aus Cargo.toml mit Zusatz, damit sie nie wie ein CI-Build aussieht.
+GALA_VERSION="$(sed -n 's/^version = "\(.*\)"/\1/p' "$repo/Cargo.toml" | head -n1)-lokal"
+export GALA_VERSION
 
 case "$source_mode" in
   build)
     echo "[gala] Images lokal bauen (GALA_IMAGE_SOURCE=build)"
     export GALA_IMAGE_REPO=gala GALA_IMAGE_TAG=local
     "$repo/deploy/common/dc.sh" "$role" build "${services[@]}"
-    write_image_env gala local
+    write_image_env gala local "$GALA_VERSION"
     ;;
   registry)
     [ -n "$registry" ] || {
@@ -103,11 +105,14 @@ EOF
       echo "[gala] Noch nicht ladbar (baut die CI noch?). Neuer Versuch in 30 s."
       sleep 30
     done
-    write_image_env "$registry" "$commit"
+    # Versionsnummer, die die CI ins Image geschrieben hat (z. B. 0.1.12); ältere Images haben keine.
+    version=$(docker image inspect -f '{{index .Config.Labels "org.opencontainers.image.version"}}' \
+      "$registry/${services[0]}:$commit" 2>/dev/null || true)
+    write_image_env "$registry" "$commit" "${version:-${commit:0:7}}"
     ;;
   *)
     echo "[gala] FEHLER: GALA_IMAGE_SOURCE='$source_mode' (erlaubt: registry, build)." >&2
     exit 1
     ;;
 esac
-echo "[gala] Images bereit ($(sed -n 's/^GALA_IMAGE_REPO=//p' /etc/gala/image.env)/…:$(sed -n 's/^GALA_IMAGE_TAG=//p' /etc/gala/image.env | cut -c1-12))."
+echo "[gala] Images bereit: Version $(sed -n 's/^GALA_VERSION=//p' /etc/gala/image.env)."

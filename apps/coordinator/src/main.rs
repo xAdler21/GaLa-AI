@@ -46,6 +46,30 @@ enum Command {
     /// Benutzerverwaltung.
     #[command(subcommand)]
     Admin(AdminCommand),
+    /// Desktop-Releases (für Veröffentlichungen per SSH, ohne Anmeldung im Admin-Panel).
+    #[command(subcommand)]
+    Release(ReleaseCommand),
+}
+
+#[derive(Subcommand)]
+enum ReleaseCommand {
+    /// Installer und Signatur als Release anlegen, wie der Upload im Admin-Panel.
+    Add {
+        /// Version (SemVer, z. B. 0.2.0).
+        #[arg(long)]
+        version: String,
+        /// Pfad zur `*-setup.exe`.
+        #[arg(long)]
+        installer: std::path::PathBuf,
+        /// Pfad zur `.sig` des Installers.
+        #[arg(long)]
+        signature: std::path::PathBuf,
+        #[arg(long, default_value = "")]
+        notes: String,
+        /// Sofort veröffentlichen (sonst im Admin-Panel).
+        #[arg(long)]
+        publish: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -102,7 +126,85 @@ async fn main() -> anyhow::Result<()> {
             db::migrate(&pool).await
         }
         Command::Admin(cmd) => admin_command(&database_url, cmd).await,
+        Command::Release(cmd) => release_command(&database_url, cmd).await,
     }
+}
+
+async fn release_command(database_url: &str, cmd: ReleaseCommand) -> anyhow::Result<()> {
+    let ReleaseCommand::Add {
+        version,
+        installer,
+        signature,
+        notes,
+        publish,
+    } = cmd;
+    let version = admin::validate_version(&version).map_err(anyhow::Error::msg)?;
+    let file_name = installer
+        .file_name()
+        .and_then(|n| n.to_str())
+        .and_then(files::sanitize_file_name)
+        .filter(|n| n.to_ascii_lowercase().ends_with(".exe"))
+        .context("Der Installer muss eine .exe-Datei sein")?;
+    let sig = std::fs::read_to_string(&signature)
+        .with_context(|| format!("{} nicht lesbar", signature.display()))?;
+    let sig = sig.trim();
+    if sig.is_empty() {
+        bail!("Die Signaturdatei ist leer");
+    }
+
+    let cfg = Config::from_env()?;
+    let pool = db::connect(database_url).await?;
+    db::migrate(&pool).await?;
+    if db::releases::get_by_version(&pool, &version)
+        .await?
+        .is_some()
+    {
+        bail!("Version {version} existiert bereits");
+    }
+    let target = files::safe_release_path(&cfg.releases_dir(), &version, &file_name)
+        .context("Unsicherer Pfad")?;
+    let dir = target.parent().context("Unsicherer Pfad")?;
+    std::fs::create_dir_all(dir)?;
+    std::fs::copy(&installer, &target)
+        .with_context(|| format!("{} nicht kopierbar", installer.display()))?;
+
+    let rec = db::releases::NewRelease {
+        version: &version,
+        platform: public::PLATFORM,
+        file_name: &file_name,
+        signature: sig,
+        notes: notes.trim(),
+        created_by: Some("cli"),
+    };
+    let rel = match db::releases::insert(&pool, &rec).await {
+        Ok(r) => r,
+        Err(e) => {
+            let _ = std::fs::remove_dir_all(dir);
+            return Err(e).context("Release konnte nicht gespeichert werden");
+        }
+    };
+    db::audit::record(
+        &pool,
+        None,
+        "release.upload",
+        serde_json::json!({ "version": version, "file": file_name, "source": "cli" }),
+    )
+    .await;
+    if publish {
+        db::releases::set_published(&pool, rel.id, true).await?;
+        db::audit::record(
+            &pool,
+            None,
+            "release.publish",
+            serde_json::json!({ "version": version, "source": "cli" }),
+        )
+        .await;
+    }
+    println!(
+        "Release {version} ({file_name}) angelegt{}.",
+        if publish { " und veröffentlicht" } else { "" }
+    );
+    Ok(())
 }
 
 /// Passwort aus `GALA_ADMIN_PASSWORD` oder interaktiv (zweimal) lesen.

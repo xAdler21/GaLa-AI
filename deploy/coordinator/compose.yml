@@ -44,6 +44,7 @@ services:
         # "embed" = Dokumenten-Chatbot an (lädt beim ersten Start BGE-M3, ca. 2 GB,
         # nach /srv/gala/data/models/fastembed). Leer = Chat antwortet mit 501.
         FEATURES: ${GALA_COORDINATOR_FEATURES-embed}
+        GALA_VERSION: ${GALA_VERSION:-}
     # Registry-Image eines Commits oder lokal gebaut: deploy/common/images.sh
     image: ${GALA_IMAGE_REPO:-gala}/coordinator:${GALA_IMAGE_TAG:-local}
     container_name: gala-coordinator
@@ -83,7 +84,7 @@ services:
       dockerfile: docker/worker.Dockerfile
       args:
         FEATURES: ""
-        GALA_BUILD_REV: ${GALA_BUILD_REV:-}
+        GALA_VERSION: ${GALA_VERSION:-}
     image: ${GALA_IMAGE_REPO:-gala}/worker-cpu:${GALA_IMAGE_TAG:-local}
     container_name: gala-worker-cpu
     restart: unless-stopped
