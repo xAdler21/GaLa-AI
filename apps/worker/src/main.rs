@@ -178,6 +178,19 @@ async fn main() -> anyhow::Result<()> {
         bail!("--concurrency muss mindestens 1 sein");
     }
     check_archive_root(&args.archiv_root)?;
+    // Ohne eingebundenes NAS würde jede OCR-Aufgabe scheitern und nach drei Versuchen
+    // endgültig als fehlgeschlagen gelten. Lieber nicht starten: Docker versucht es erneut,
+    // und dank rslave-Einbindung sieht der nächste Start das NAS, sobald es da ist.
+    if args.role == Role::Vision
+        && std::fs::read_dir(&args.archiv_root)
+            .map(|mut d| d.next().is_none())
+            .unwrap_or(true)
+    {
+        bail!(
+            "Archiv-Wurzel {} ist leer: Netzlaufwerk nicht eingebunden (mount /mnt/archiv auf dem Host)",
+            args.archiv_root.display()
+        );
+    }
 
     let name = args
         .name

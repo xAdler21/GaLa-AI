@@ -100,7 +100,14 @@ services:
       GALA_WORKER_NAME: gala-coordinator-cpu
     volumes:
       - /srv/gala/data:/srv/gala/data
-      - /mnt/archiv:/mnt/archiv:ro
+      # rslave: hängt der Host das NAS erst nach dem Containerstart ein (oder nach einem
+      # Ausfall neu), sieht der Container es trotzdem, ohne Neustart.
+      - type: bind
+        source: /mnt/archiv
+        target: /mnt/archiv
+        read_only: true
+        bind:
+          propagation: rslave
     extra_hosts:
       - "gala-llm:${GALA_LLM_IP:?GALA_LLM_IP fehlt in /etc/gala/hosts.env}"
 

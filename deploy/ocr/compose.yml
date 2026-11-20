@@ -37,7 +37,14 @@ services:
     volumes:
       # NAS (CIFS, read-only) und Datei-Store (NFS von gala-coordinator);
       # beide werden vom Host (fstab) eingebunden, siehe install.sh.
-      - /mnt/archiv:/mnt/archiv:ro
+      # rslave: hängt der Host das NAS erst nach dem Containerstart ein (oder nach einem
+      # Ausfall neu), sieht der Container es trotzdem, ohne Neustart.
+      - type: bind
+        source: /mnt/archiv
+        target: /mnt/archiv
+        read_only: true
+        bind:
+          propagation: rslave
       - /srv/gala/data:/srv/gala/data
       # Heruntergeladene OCR-/Embedding-Modelle
       - oar-models:/var/cache/gala/oar
