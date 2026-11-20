@@ -179,11 +179,13 @@ async fn me(AuthUser(s): AuthUser) -> Json<UserInfo> {
 /// Dokumenten-Chatbot. Ohne Embedder (Feature `embed`) 501, bei nicht erreichbarem LLM 503.
 async fn chat(
     State(state): State<AppState>,
-    _user: AuthUser,
+    AuthUser(user): AuthUser,
     payload: Result<Json<ChatRequest>, JsonRejection>,
 ) -> Result<Json<ChatResponse>, ApiErr> {
     let Json(req) = payload.map_err(|e| ApiErr::bad_request(format!("Ungültige Anfrage: {e}")))?;
-    chatbot::run(state.chat.as_deref(), &req).await.map(Json)
+    chatbot::run(state.chat.as_deref(), &req, &state.chat_log, &user.username)
+        .await
+        .map(Json)
 }
 
 async fn update_check(

@@ -92,6 +92,51 @@ pub struct QueueRowView {
     pub pending: i64,
     pub running: i64,
     pub failed: i64,
+    /// Erledigt in den letzten 10 Minuten bzw. der letzten Stunde.
+    pub last_10m: i64,
+    pub per_hour: i64,
+    /// Restzeit beim Durchsatz der letzten Stunde, z. B. „ca. 3,5 h“.
+    pub eta: String,
+}
+
+/// Eine Aufgabe in den Listen „Läuft gerade“, „OCR live“ und „Fehler“.
+pub struct TaskLineView {
+    pub kind: String,
+    /// Gekürzter Pfad mit Seite; `path` ist der volle Pfad (Tooltip).
+    pub place: String,
+    pub path: String,
+    pub worker: String,
+    /// `true`: endgültig gescheitert, sonst wird es erneut versucht.
+    pub final_failure: bool,
+    pub attempts: i32,
+    pub error: String,
+    pub error_short: String,
+    pub ago: String,
+    /// Anfang des erkannten Textes (nur OCR).
+    pub preview: String,
+}
+
+/// Zustand von llama-server.
+#[derive(Default)]
+pub struct LlmView {
+    pub url: String,
+    pub reachable: bool,
+    pub busy: usize,
+    pub total: usize,
+    /// Kontext je Slot in Token.
+    pub n_ctx: u32,
+    /// Fehlermeldung, wenn nicht erreichbar.
+    pub detail: String,
+}
+
+/// Eine Chat-Anfrage (ohne Fragetext).
+pub struct ChatEventView {
+    pub ago: String,
+    pub user: String,
+    pub secs: String,
+    pub ok: bool,
+    pub outcome: String,
+    pub outcome_full: String,
 }
 
 /// Zustand des Dokumenten-Index (Worker, Warteschlange, Dokumente).
@@ -103,6 +148,11 @@ pub struct IndexStatusView {
     pub docs_indexed: i64,
     pub docs_in_progress: i64,
     pub docs_failed: i64,
+    pub running: Vec<TaskLineView>,
+    pub ocr_live: Vec<TaskLineView>,
+    pub failures: Vec<TaskLineView>,
+    pub llm: LlmView,
+    pub chats: Vec<ChatEventView>,
 }
 
 #[derive(Template)]
@@ -252,12 +302,56 @@ mod tests {
                 pending: 41,
                 running: 1,
                 failed: 3,
+                last_10m: 7,
+                per_hour: 40,
+                eta: "ca. 1,1 h".into(),
             }],
             warnings: vec!["Aufgaben <warten>".into()],
             docs_total: 12,
             docs_indexed: 9,
             docs_in_progress: 2,
             docs_failed: 1,
+            running: vec![],
+            ocr_live: vec![TaskLineView {
+                kind: "OCR (Seiten)".into(),
+                place: "…/Angebote/Holz.TIF, S. 1".into(),
+                path: "2008/Angebote/Holz.TIF".into(),
+                worker: "gala-ocr-vision".into(),
+                final_failure: false,
+                attempts: 1,
+                error: String::new(),
+                error_short: String::new(),
+                ago: "vor 4 s".into(),
+                preview: "PREISANFRAGE <b>".into(),
+            }],
+            failures: vec![TaskLineView {
+                kind: "OCR (Seiten)".into(),
+                place: "…/Sträußl/SCAN0252_000.tif, S. 2".into(),
+                path: "x/SCAN0252_000.tif".into(),
+                worker: "gala-ocr-vision".into(),
+                final_failure: true,
+                attempts: 3,
+                error: "Unknown(24)".into(),
+                error_short: "Unknown(24)".into(),
+                ago: "vor 1 min".into(),
+                preview: String::new(),
+            }],
+            llm: LlmView {
+                url: "http://gala-llm:8080".into(),
+                reachable: true,
+                busy: 1,
+                total: 2,
+                n_ctx: 16384,
+                detail: String::new(),
+            },
+            chats: vec![ChatEventView {
+                ago: "vor 2 min".into(),
+                user: "anna".into(),
+                secs: "3,4 s".into(),
+                ok: false,
+                outcome: "context size".into(),
+                outcome_full: "context size".into(),
+            }],
         }
     }
 
@@ -274,6 +368,13 @@ mod tests {
         assert!(html.contains("keine Meldung"));
         assert!(html.contains("OCR (Seiten)"));
         assert!(html.contains(">41<"));
+        assert!(html.contains("ca. 1,1 h"));
+        assert!(html.contains("Kontext je Slot 16384"));
+        assert!(html.contains("context size"));
+        assert!(
+            html.contains("PREISANFRAGE &lt;b&gt;") || html.contains("PREISANFRAGE &#60;b&#62;")
+        );
+        assert!(html.contains("SCAN0252_000.tif") && html.contains("endgültig"));
         // Warnungen werden maskiert ausgegeben
         assert!(!html.contains("<warten>"));
         // lädt sich selbst nach
@@ -291,10 +392,16 @@ mod tests {
                 docs_indexed: 0,
                 docs_in_progress: 0,
                 docs_failed: 0,
+                running: vec![],
+                ocr_live: vec![],
+                failures: vec![],
+                llm: LlmView::default(),
+                chats: vec![],
             },
         }
         .render()
         .unwrap();
         assert!(html.contains("Noch kein Worker"));
+        assert!(html.contains("nicht erreichbar"));
     }
 }

@@ -6,7 +6,7 @@ use std::time::Duration;
 use db::PgPool;
 
 use crate::auth::LoginLimiter;
-use crate::chatbot::SharedChatbot;
+use crate::chatbot::{ChatLog, SharedChatbot};
 use crate::config::Config;
 
 #[derive(Clone)]
@@ -16,6 +16,10 @@ pub struct AppState {
     pub limiter: LoginLimiter,
     /// Dokumenten-Chatbot; `None`, wenn nicht aktiviert (siehe `chatbot::NOT_ENABLED`).
     pub chat: Option<SharedChatbot>,
+    /// Letzte Chat-Anfragen für das Admin-Panel.
+    pub chat_log: ChatLog,
+    /// Kurzer Zeitlimit-Client für den LLM-Zustand im Admin-Panel.
+    pub llm_status: Option<Arc<llm::LlmClient>>,
 }
 
 impl AppState {
@@ -25,12 +29,17 @@ impl AppState {
     }
 
     pub fn with_chat(db: PgPool, cfg: Config, chat: Option<SharedChatbot>) -> Self {
+        let llm_status = llm::LlmClient::new(cfg.llm_url.clone(), Duration::from_secs(2))
+            .ok()
+            .map(Arc::new);
         Self {
             db,
             cfg: Arc::new(cfg),
             // 5 Fehlversuche je Nutzername + IP in 10 Minuten
             limiter: LoginLimiter::new(5, Duration::from_secs(600)),
             chat,
+            chat_log: ChatLog::default(),
+            llm_status,
         }
     }
 }

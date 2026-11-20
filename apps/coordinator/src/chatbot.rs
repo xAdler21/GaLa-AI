@@ -3,10 +3,13 @@
 //! `ChatService` ist über Embedder/Suche/LLM generisch (nicht objektsicher); hier wird er hinter
 //! [`Chatbot`] versteckt, damit `AppState` ihn ohne Typparameter halten und Tests ihn ersetzen können.
 
+use std::collections::VecDeque;
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::Arc;
-use std::time::Duration;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
+
+use chrono::{DateTime, Utc};
 
 use api_types::client::{ChatRequest, ChatResponse, ChatTurn};
 use chat::{ChatError, ChatService, Llm, Search};
@@ -49,6 +52,43 @@ impl<E: Embedder, S: Search, L: Llm> Chatbot for ChatService<E, S, L> {
 
 pub type SharedChatbot = Arc<dyn Chatbot>;
 
+/// Eine Chat-Anfrage für das Admin-Panel (ohne Fragetext).
+#[derive(Debug, Clone)]
+pub struct ChatEvent {
+    pub at: DateTime<Utc>,
+    pub user: String,
+    pub millis: u128,
+    pub ok: bool,
+    /// z. B. „Antwort, 5 Quellen“, „nichts gefunden“ oder die volle Fehlerkette.
+    pub outcome: String,
+}
+
+/// Die letzten Chat-Anfragen, nur im Speicher (nach einem Neustart leer).
+#[derive(Clone, Default)]
+pub struct ChatLog(Arc<Mutex<VecDeque<ChatEvent>>>);
+
+impl ChatLog {
+    const MAX: usize = 20;
+
+    fn push(&self, e: ChatEvent) {
+        let mut q = self.0.lock().unwrap_or_else(|p| p.into_inner());
+        if q.len() == Self::MAX {
+            q.pop_back();
+        }
+        q.push_front(e);
+    }
+
+    /// Neueste zuerst.
+    pub fn recent(&self) -> Vec<ChatEvent> {
+        self.0
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .iter()
+            .cloned()
+            .collect()
+    }
+}
+
 /// Bildet Fehler des Chat-Crates auf API-Fehler ab. Nicht erreichbares LLM ist 503
 /// `llm_unavailable` (die LLM-VM kann ausgeschaltet sein), alles andere ein interner Fehler.
 pub fn map_chat_error(err: &ChatError) -> ApiErr {
@@ -75,8 +115,14 @@ fn error_chain(e: &dyn std::error::Error) -> String {
     s
 }
 
-/// Prüft die Anfrage und beantwortet sie. Ohne Chatbot: 501.
-pub async fn run(bot: Option<&dyn Chatbot>, req: &ChatRequest) -> Result<ChatResponse, ApiErr> {
+/// Prüft die Anfrage und beantwortet sie. Ohne Chatbot: 501. Jede Anfrage an das Modell
+/// landet in `log` (mit der vollen Fehlerursache, die die App nicht sieht).
+pub async fn run(
+    bot: Option<&dyn Chatbot>,
+    req: &ChatRequest,
+    log: &ChatLog,
+    user: &str,
+) -> Result<ChatResponse, ApiErr> {
     let Some(bot) = bot else {
         return Err(ApiErr::not_implemented(NOT_ENABLED));
     };
@@ -89,9 +135,21 @@ pub async fn run(bot: Option<&dyn Chatbot>, req: &ChatRequest) -> Result<ChatRes
             "Die Frage ist zu lang (höchstens {MAX_QUESTION_CHARS} Zeichen)"
         )));
     }
-    bot.answer(question, &req.history)
-        .await
-        .map_err(|e| map_chat_error(&e))
+    let started = Instant::now();
+    let result = bot.answer(question, &req.history).await;
+    let (ok, outcome) = match &result {
+        Ok(r) if r.sources.is_empty() => (true, "nichts gefunden".to_string()),
+        Ok(r) => (true, format!("Antwort, {} Quellen", r.sources.len())),
+        Err(e) => (false, error_chain(e)),
+    };
+    log.push(ChatEvent {
+        at: Utc::now(),
+        user: user.to_string(),
+        millis: started.elapsed().as_millis(),
+        ok,
+        outcome,
+    });
+    result.map_err(|e| map_chat_error(&e))
 }
 
 #[cfg(test)]
@@ -167,7 +225,9 @@ mod tests {
 
     #[tokio::test]
     async fn run_without_bot_is_501_with_message() {
-        let e = run(None, &req("Frage")).await.unwrap_err();
+        let e = run(None, &req("Frage"), &ChatLog::default(), "t")
+            .await
+            .unwrap_err();
         assert_eq!(e.status, StatusCode::NOT_IMPLEMENTED);
         assert_eq!(e.message, NOT_ENABLED);
     }
@@ -178,13 +238,22 @@ mod tests {
             answer: "Antwort".into(),
             sources: Vec::new(),
         }));
-        let e = run(Some(&ok), &req("   ")).await.unwrap_err();
+        let log = ChatLog::default();
+        let e = run(Some(&ok), &req("   "), &log, "t").await.unwrap_err();
         assert_eq!(e.status, StatusCode::BAD_REQUEST);
-        let e = run(Some(&ok), &req(&"a".repeat(MAX_QUESTION_CHARS + 1)))
-            .await
-            .unwrap_err();
+        let e = run(
+            Some(&ok),
+            &req(&"a".repeat(MAX_QUESTION_CHARS + 1)),
+            &log,
+            "t",
+        )
+        .await
+        .unwrap_err();
         assert_eq!(e.status, StatusCode::BAD_REQUEST);
-        assert_eq!(run(Some(&ok), &req("Wo?")).await.unwrap().answer, "Antwort");
+        assert_eq!(
+            run(Some(&ok), &req("Wo?"), &log, "t").await.unwrap().answer,
+            "Antwort"
+        );
 
         let down = Fake(Err(|| {
             ChatError::Llm(LlmError::Status {
@@ -192,7 +261,15 @@ mod tests {
                 body: String::new(),
             })
         }));
-        let e = run(Some(&down), &req("Wo?")).await.unwrap_err();
+        let e = run(Some(&down), &req("Wo?"), &log, "anna")
+            .await
+            .unwrap_err();
         assert_eq!(e.code, "llm_unavailable");
+
+        // Nur echte Modellaufrufe, neueste zuerst, mit voller Fehlerursache.
+        let events = log.recent();
+        assert_eq!(events.len(), 2);
+        assert!(!events[0].ok && events[0].user == "anna" && events[0].outcome.contains("502"));
+        assert!(events[1].ok && events[1].outcome == "nichts gefunden");
     }
 }

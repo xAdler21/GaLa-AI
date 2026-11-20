@@ -1,4 +1,4 @@
-<div id="index-status" hx-get="/admin/index/status" hx-trigger="every 15s" hx-swap="outerHTML">
+<div id="index-status" hx-get="/admin/index/status" hx-trigger="every 5s" hx-swap="outerHTML">
   {% for w in index.warnings %}<p class="alert warn">{{ w }}</p>{% endfor %}
 
   <h3>Worker</h3>
@@ -28,7 +28,7 @@
   <h3>Warteschlange</h3>
   <div class="scroll">
   <table class="compact">
-    <thead><tr><th>Aufgabe</th><th class="num">Wartend</th><th class="num">Läuft</th><th class="num">Gescheitert</th></tr></thead>
+    <thead><tr><th>Aufgabe</th><th class="num">Wartend</th><th class="num">Läuft</th><th class="num">Gescheitert</th><th class="num">Erledigt 10 min</th><th class="num">Je Stunde</th><th>Restzeit</th></tr></thead>
     <tbody>
     {% for q in index.queue %}
       <tr>
@@ -36,14 +36,103 @@
         <td class="num">{{ q.pending }}</td>
         <td class="num">{{ q.running }}</td>
         <td class="num">{% if q.failed > 0 %}<span class="badge failed">{{ q.failed }}</span>{% else %}0{% endif %}</td>
+        <td class="num">{{ q.last_10m }}</td>
+        <td class="num">{{ q.per_hour }}</td>
+        <td class="nowrap">{{ q.eta }}</td>
       </tr>
     {% endfor %}
     </tbody>
   </table>
   </div>
-
   <p class="muted">
     Dokumente: {{ index.docs_total }} gesamt, {{ index.docs_indexed }} indexiert,
     {{ index.docs_in_progress }} in Arbeit, {{ index.docs_failed }} gescheitert.
+    Restzeit nach dem Durchsatz der letzten Stunde; neu gefundene Seiten verlängern sie.
   </p>
+
+  <h3>Sprachmodell (Chat)</h3>
+  {% if index.llm.reachable %}
+  <p><span class="badge succeeded">erreichbar</span>
+    Slots belegt: {{ index.llm.busy }} von {{ index.llm.total }}, Kontext je Slot {{ index.llm.n_ctx }} Token
+    <span class="muted">({{ index.llm.url }})</span></p>
+  {% else %}
+  <p><span class="badge failed">nicht erreichbar</span> <span class="muted">{{ index.llm.url }}: {{ index.llm.detail }}</span></p>
+  {% endif %}
+  {% if index.chats.is_empty() %}
+  <p class="muted">Seit dem letzten Neustart des Servers keine Chat-Anfragen.</p>
+  {% else %}
+  <div class="scroll">
+  <table class="compact">
+    <thead><tr><th>Wann</th><th>Benutzer</th><th class="num">Dauer</th><th>Ergebnis</th></tr></thead>
+    <tbody>
+    {% for c in index.chats %}
+      <tr>
+        <td class="nowrap">{{ c.ago }}</td>
+        <td>{{ c.user }}</td>
+        <td class="num">{{ c.secs }}</td>
+        <td title="{{ c.outcome_full }}">{% if c.ok %}{{ c.outcome }}{% else %}<span class="badge failed">Fehler</span> {{ c.outcome }}{% endif %}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% endif %}
+
+  <h3>Läuft gerade</h3>
+  {% if index.running.is_empty() %}
+  <p class="muted">Nichts.</p>
+  {% else %}
+  <div class="scroll">
+  <table class="compact">
+    <thead><tr><th>Aufgabe</th><th>Dokument</th><th>Worker</th><th class="num">Versuch</th></tr></thead>
+    <tbody>
+    {% for t in index.running %}
+      <tr><td class="nowrap">{{ t.kind }}</td><td title="{{ t.path }}">{{ t.place }}</td><td>{{ t.worker }}</td><td class="num">{{ t.attempts }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% endif %}
+
+  <h3>OCR live</h3>
+  {% if index.ocr_live.is_empty() %}
+  <p class="muted">In der letzten Stunde keine OCR-Seite fertig geworden.</p>
+  {% else %}
+  <div class="scroll">
+  <table class="compact">
+    <thead><tr><th>Wann</th><th>Seite</th><th>Erkannter Text (Anfang)</th></tr></thead>
+    <tbody>
+    {% for t in index.ocr_live %}
+      <tr>
+        <td class="nowrap">{{ t.ago }}</td>
+        <td title="{{ t.path }}">{{ t.place }}</td>
+        <td class="muted">{% if t.preview.is_empty() %}<em>kein Text erkannt</em>{% else %}{{ t.preview }}{% endif %}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% endif %}
+
+  <h3>Fehler (letzte 30)</h3>
+  {% if index.failures.is_empty() %}
+  <p class="muted">Keine.</p>
+  {% else %}
+  <div class="scroll">
+  <table class="compact">
+    <thead><tr><th>Wann</th><th>Aufgabe</th><th>Dokument</th><th>Status</th><th>Fehler</th></tr></thead>
+    <tbody>
+    {% for t in index.failures %}
+      <tr>
+        <td class="nowrap">{{ t.ago }}</td>
+        <td class="nowrap">{{ t.kind }}</td>
+        <td title="{{ t.path }}">{{ t.place }}</td>
+        <td class="nowrap">{% if t.final_failure %}<span class="badge failed">endgültig</span>{% else %}<span class="badge pending">Versuch {{ t.attempts }}, wird wiederholt</span>{% endif %}</td>
+        <td class="muted" title="{{ t.error }}">{{ t.error_short }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% endif %}
 </div>

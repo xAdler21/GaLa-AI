@@ -122,6 +122,14 @@ pub fn parse_json_content<T: DeserializeOwned>(content: &str) -> Result<T, LlmEr
     serde_json::from_str(trimmed).map_err(LlmError::Deserialize)
 }
 
+/// Ein Slot von llama-server (`GET /slots`); je Slot läuft eine Anfrage gleichzeitig.
+#[derive(Debug, Clone, Deserialize)]
+pub struct SlotInfo {
+    pub id: u32,
+    pub n_ctx: u32,
+    pub is_processing: bool,
+}
+
 #[derive(Debug, Clone)]
 pub struct LlmClient {
     http: reqwest::Client,
@@ -160,6 +168,23 @@ impl LlmClient {
             Ok(resp) => resp.status().is_success(),
             Err(_) => false,
         }
+    }
+
+    /// `GET /slots`: Belegung und Kontextgröße je Slot (für das Admin-Panel).
+    pub async fn slots(&self) -> Result<Vec<SlotInfo>, LlmError> {
+        let resp = self
+            .http
+            .get(format!("{}/slots", self.base_url))
+            .send()
+            .await?;
+        let status = resp.status();
+        if !status.is_success() {
+            return Err(LlmError::Status {
+                status: status.as_u16(),
+                body: resp.text().await.unwrap_or_default(),
+            });
+        }
+        Ok(resp.json().await?)
     }
 
     async fn post_chat(&self, body: &Value) -> Result<String, LlmError> {

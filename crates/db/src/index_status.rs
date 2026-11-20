@@ -100,3 +100,79 @@ pub async fn document_counts(pool: &PgPool) -> Result<Vec<DocumentCount>, sqlx::
     .fetch_all(pool)
     .await
 }
+
+/// Erledigte Aufgaben je Art: in den letzten 10 Minuten und in der letzten Stunde.
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct Throughput {
+    pub kind: String,
+    pub last_10m: i64,
+    pub last_1h: i64,
+}
+
+pub async fn throughput(pool: &PgPool) -> Result<Vec<Throughput>, sqlx::Error> {
+    sqlx::query_as::<_, Throughput>(
+        "SELECT kind, \
+                count(*) FILTER (WHERE updated_at > now() - interval '10 minutes') AS last_10m, \
+                count(*) AS last_1h \
+         FROM index_task WHERE status = 'done' AND updated_at > now() - interval '1 hour' \
+         GROUP BY kind",
+    )
+    .fetch_all(pool)
+    .await
+}
+
+/// Eine Aufgabe mit Dokumentpfad, für die Listen im Admin-Panel.
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct TaskLine {
+    pub kind: String,
+    pub page: Option<i32>,
+    pub rel_path: String,
+    pub worker: Option<String>,
+    pub status: String,
+    pub attempts: i32,
+    pub error: Option<String>,
+    pub updated_at: DateTime<Utc>,
+    /// Nur bei OCR-Seiten: Anfang des erkannten Textes.
+    pub preview: Option<String>,
+}
+
+/// Gerade laufende Aufgaben.
+pub async fn running_tasks(pool: &PgPool, limit: i64) -> Result<Vec<TaskLine>, sqlx::Error> {
+    sqlx::query_as::<_, TaskLine>(
+        "SELECT t.kind, t.page, d.rel_path, t.worker, t.status, t.attempts, t.error, \
+                t.updated_at, NULL::text AS preview \
+         FROM index_task t JOIN document d ON d.id = t.document_id \
+         WHERE t.status = 'running' ORDER BY t.id LIMIT $1",
+    )
+    .bind(limit)
+    .fetch_all(pool)
+    .await
+}
+
+/// Zuletzt fertige OCR-Seiten (letzte Stunde) mit dem Anfang des erkannten Textes.
+pub async fn recent_ocr(pool: &PgPool, limit: i64) -> Result<Vec<TaskLine>, sqlx::Error> {
+    sqlx::query_as::<_, TaskLine>(
+        "SELECT t.kind, t.page, d.rel_path, t.worker, t.status, t.attempts, t.error, t.updated_at, \
+                (SELECT left(regexp_replace(c.text, '\\s+', ' ', 'g'), 240) FROM chunk c \
+                 WHERE c.document_id = t.document_id AND c.page = t.page ORDER BY c.ord LIMIT 1) AS preview \
+         FROM index_task t JOIN document d ON d.id = t.document_id \
+         WHERE t.status = 'done' AND t.kind = 'ocr_page' AND t.updated_at > now() - interval '1 hour' \
+         ORDER BY t.updated_at DESC LIMIT $1",
+    )
+    .bind(limit)
+    .fetch_all(pool)
+    .await
+}
+
+/// Zuletzt gescheiterte Versuche: endgültig (`failed`) oder mit Wiederholung (`pending`).
+pub async fn recent_failures(pool: &PgPool, limit: i64) -> Result<Vec<TaskLine>, sqlx::Error> {
+    sqlx::query_as::<_, TaskLine>(
+        "SELECT t.kind, t.page, d.rel_path, t.worker, t.status, t.attempts, t.error, \
+                t.updated_at, NULL::text AS preview \
+         FROM index_task t JOIN document d ON d.id = t.document_id \
+         WHERE t.error IS NOT NULL ORDER BY t.updated_at DESC LIMIT $1",
+    )
+    .bind(limit)
+    .fetch_all(pool)
+    .await
+}
