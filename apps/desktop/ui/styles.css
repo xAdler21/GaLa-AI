@@ -181,7 +181,7 @@ details.msg ul { margin: .4rem 0 0; padding-left: 1.2rem; }
 
 table.list, table.lv { width: 100%; border-collapse: collapse; background: var(--surface); box-shadow: var(--shadow); }
 table.list th, table.lv th { text-align: left; font-weight: 600; font-size: .85rem; color: var(--muted); background: var(--surface-2); padding: .5rem .6rem; position: sticky; top: 0; z-index: 1; }
-table.list td, table.lv td { padding: .45rem .6rem; border-top: 1px solid var(--border); vertical-align: top; }
+table.list td, table.lv td { padding: .6rem .75rem; border-top: 1px solid var(--border); vertical-align: top; }
 th.num, td.num { text-align: right; white-space: nowrap; }
 td.ok { color: var(--ok); font-weight: 600; }
 table.list td.muted { overflow-wrap: anywhere; }
@@ -194,10 +194,9 @@ table.lv tr.title td { background: color-mix(in srgb, var(--accent) 9%, var(--su
 table.lv tr.title.d1 td { background: color-mix(in srgb, var(--accent) 5%, var(--surface)); }
 table.lv tr.title.d2 td, table.lv tr.title.d3 td { background: var(--surface); font-style: italic; }
 table.lv td.oz { white-space: nowrap; font-variant-numeric: tabular-nums; color: var(--muted); }
-table.lv td.text { width: 60%; }
+table.lv td.text { width: 55%; }
 table.lv td.text.click { cursor: pointer; }
 table.lv td.text.click:hover { color: var(--accent); }
-table.lv .long { white-space: pre-wrap; color: var(--muted); font-size: .88rem; margin-top: .4rem; cursor: text; }
 table.lv td.num { font-variant-numeric: tabular-nums; }
 table.lv td.gp.muted { color: var(--muted); }
 .badge { display: inline-block; font-size: .72rem; padding: .05rem .4rem; border-radius: 6px; background: var(--warn-bg); color: var(--warn); vertical-align: 1px; }
@@ -208,3 +207,36 @@ tr.pos.priced input.ep { background: var(--surface); }
 table.lv td.hist { white-space: nowrap; }
 .hist-btn { background: none; border: 1px dashed var(--border); border-radius: 6px; padding: .15rem .45rem; font-size: .82rem; color: var(--muted); cursor: pointer; font-variant-numeric: tabular-nums; }
 .hist-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+/* Angebots-Editor: Kopf bleibt stehen, nur die Tabelle scrollt (sonst rutscht die
+   klebende Tabellenkopfzeile unter die Seiten-Polsterung). */
+.page.offer { display: flex; flex-direction: column; overflow: hidden; padding-bottom: 1rem; }
+.lv-wrap { flex: 1; overflow: auto; min-height: 0; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+.lv-wrap table.lv { box-shadow: none; }
+table.lv thead th { box-shadow: 0 1px 0 var(--border); }
+.toolbar .grow { flex: 1; }
+.toolbar input.search, .toolbar select.sort {
+  background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: .45rem .7rem; outline: none;
+}
+.toolbar input.search { width: 18rem; }
+.toolbar input.search:focus, .toolbar select.sort:focus { border-color: var(--accent); }
+.totals .progress { width: 220px; margin: .4rem 0 0 auto; height: 6px; }
+table.lv tr.pos:hover td { background: color-mix(in srgb, var(--accent) 4%, var(--surface)); }
+table.lv tr.pos.open td { background: color-mix(in srgb, var(--accent) 7%, var(--surface)); border-bottom: 0; }
+table.lv tr.title td { padding-top: .8rem; padding-bottom: .8rem; }
+table.lv .kt { font-weight: 500; }
+table.lv .lt-preview {
+  color: var(--muted); font-size: .85rem; margin-top: .2rem;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+table.lv .lt-preview.hidden { display: none; }
+table.lv td.unit { color: var(--muted); }
+table.lv tr.detail > td { background: color-mix(in srgb, var(--accent) 7%, var(--surface)); border-top: 0; padding-bottom: 1.1rem; }
+.lt-full { white-space: pre-wrap; font-size: .9rem; margin-bottom: .9rem; max-width: 70rem; }
+.hist-head { margin-bottom: .4rem; }
+table.hist-table { border-collapse: collapse; width: 100%; font-size: .87rem; background: var(--surface); border-radius: 8px; }
+table.hist-table th { position: static; background: none; font-size: .78rem; padding: .3rem .5rem; color: var(--muted); }
+table.hist-table td { padding: .35rem .5rem; border-top: 1px solid var(--border); }
+table.hist-table .path { overflow-wrap: anywhere; font-size: .75rem; }
+.btn.sm { padding: .2rem .55rem; font-size: .82rem; }
+.hist-more { display: block; margin: .2rem 0 0 auto; font-size: .78rem; }

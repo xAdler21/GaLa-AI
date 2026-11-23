@@ -30,14 +30,18 @@ fn App() -> impl IntoView {
     spawn_local(start(ctx));
     spawn_local(health_loop(ctx));
 
+    // Memos: Die Health-Abfrage alle 30 s darf nicht die ganze Oberflaeche neu aufbauen
+    // (sonst verschwindet z. B. das offene LV kurz und wird neu geladen).
+    let required = Memo::new(move |_| ctx.update_required());
+    let maintenance = Memo::new(move |_| ctx.maintenance().is_some());
     move || {
         let screen = ctx.screen.get();
         // Pflicht-Update und Wartung sperren alles, ausser Einrichtung und Start.
         // Die Wartung sperrt nur die angemeldete Ansicht, damit Anmeldung und Server-Wechsel moeglich bleiben.
-        if !matches!(screen, Screen::Boot | Screen::Setup) && ctx.update_required() {
+        if !matches!(screen, Screen::Boot | Screen::Setup) && required.get() {
             return view! { <ForceUpdateScreen/> }.into_any();
         }
-        if screen == Screen::Main && ctx.maintenance().is_some() {
+        if screen == Screen::Main && maintenance.get() {
             return view! { <MaintenanceScreen/> }.into_any();
         }
         match screen {

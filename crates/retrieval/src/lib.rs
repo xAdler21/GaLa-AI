@@ -282,7 +282,7 @@ impl PgVectorStore {
         let sparse = sqlx::query(
             "SELECT c.id, d.rel_path, c.page, c.text \
              FROM chunk c JOIN document d ON d.id = c.document_id, \
-                  websearch_to_tsquery('german', $1) q \
+                  replace(websearch_to_tsquery('german', $1)::text, ' & ', ' | ')::tsquery q \
              WHERE c.tsv @@ q \
              ORDER BY ts_rank_cd(c.tsv, q) DESC LIMIT $2",
         )
@@ -303,9 +303,11 @@ impl PgVectorStore {
             lists.push(ids);
         }
 
-        Ok(rrf_fuse(&lists, RRF_K)
+        let fused = rrf_fuse(&lists, RRF_K);
+        let path_of = |id: &Uuid| by_id.get(id).map(|r| r.rel_path.clone());
+        let picked = diversify(fused, path_of, MAX_PER_DOCUMENT, limit);
+        Ok(picked
             .into_iter()
-            .take(limit)
             .filter_map(|(id, score)| {
                 let r = by_id.remove(&id)?;
                 Some(Hit {
@@ -320,9 +322,47 @@ impl PgVectorStore {
     }
 }
 
+/// Höchstens so viele Fundstellen aus einem Dokument, damit nicht acht Seiten derselben
+/// Ausschreibung die Quellen füllen.
+pub const MAX_PER_DOCUMENT: usize = 2;
+
+/// Nimmt die besten `limit` Treffer, je Dokument (`doc_of`) höchstens `per_doc`.
+pub fn diversify<K, D: Hash + Eq>(
+    ranked: Vec<(K, f32)>,
+    doc_of: impl Fn(&K) -> Option<D>,
+    per_doc: usize,
+    limit: usize,
+) -> Vec<(K, f32)> {
+    let mut seen: HashMap<D, usize> = HashMap::new();
+    ranked
+        .into_iter()
+        .filter(|(k, _)| {
+            let Some(d) = doc_of(k) else { return false };
+            let n = seen.entry(d).or_insert(0);
+            *n += 1;
+            *n <= per_doc
+        })
+        .take(limit)
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn diversify_caps_per_document() {
+        let ranked = vec![
+            ("a1", 0.9),
+            ("a2", 0.8),
+            ("a3", 0.7),
+            ("b1", 0.6),
+            ("c1", 0.5),
+        ];
+        let out = diversify(ranked, |k| Some(k.as_bytes()[0]), 2, 3);
+        let keys: Vec<_> = out.iter().map(|(k, _)| *k).collect();
+        assert_eq!(keys, ["a1", "a2", "b1"]);
+    }
 
     #[test]
     fn rrf_single_list_keeps_order() {

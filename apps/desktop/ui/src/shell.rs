@@ -82,7 +82,11 @@ fn SettingsPage() -> impl IntoView {
                     <dt>"Server-Version"</dt>
                     <dd>{move || ctx.health.get().map(|h| h.server_version).unwrap_or_else(|| "unbekannt".to_owned())}</dd>
                 </dl>
-                <button class="btn secondary" on:click=move |_| ctx.screen.set(Screen::Setup)>"Server ändern"</button>
+                <div class="row">
+                    <button class="btn secondary" on:click=move |_| ctx.screen.set(Screen::Setup)>"Server ändern"</button>
+                    <button class="btn secondary" title="Admin-Bereich des Servers im Browser öffnen (Server-Update, Wartung, Index-Zustand)"
+                        on:click=move |_| spawn_local(async move { let _ = tauri::open_web_panel().await; })>"Web-Panel öffnen ↗"</button>
+                </div>
             </div>
             <div class="panel">
                 <h2>"Updates"</h2>

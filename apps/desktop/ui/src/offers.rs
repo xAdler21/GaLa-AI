@@ -206,10 +206,11 @@ enum SaveState {
 
 #[derive(Clone)]
 struct PosRow {
-    idx: usize,
     oz: Oz,
     kurztext: String,
     langtext: String,
+    /// Kleingeschrieben: OZ, Kurz- und Langtext für die Suche.
+    hay: String,
     menge: Option<Decimal>,
     einheit: String,
     art: PositionsArt,
@@ -233,7 +234,7 @@ enum Row {
 }
 
 fn rows_of(lv: &Lv) -> Vec<Row> {
-    fn walk(nodes: &[Node], depth: usize, out: &mut Vec<Row>, idx: &mut usize) {
+    fn walk(nodes: &[Node], depth: usize, out: &mut Vec<Row>) {
         for n in nodes {
             match n {
                 Node::Titel(t) => {
@@ -247,18 +248,20 @@ fn rows_of(lv: &Lv) -> Vec<Row> {
                             .unwrap_or_default(),
                         label: t.bezeichnung.value.clone().unwrap_or_default(),
                     });
-                    walk(&t.children, depth + 1, out, idx);
+                    walk(&t.children, depth + 1, out);
                 }
                 Node::Position(p) => {
                     let Some(oz) = p.oz.value.clone() else {
                         continue;
                     };
                     let ep = p.ep.value;
+                    let kurztext = p.kurztext.value.clone().unwrap_or_default();
+                    let langtext = p.langtext.value.clone().unwrap_or_default();
                     out.push(Row::Pos(PosRow {
-                        idx: *idx,
+                        hay: format!("{oz} {kurztext} {langtext}").to_lowercase(),
                         oz,
-                        kurztext: p.kurztext.value.clone().unwrap_or_default(),
-                        langtext: p.langtext.value.clone().unwrap_or_default(),
+                        kurztext,
+                        langtext,
                         menge: p.menge.value,
                         einheit: p
                             .einheit
@@ -273,15 +276,53 @@ fn rows_of(lv: &Lv) -> Vec<Row> {
                         state: RwSignal::new(SaveState::Idle),
                         open: RwSignal::new(false),
                     }));
-                    *idx += 1;
                 }
                 Node::Vorbemerkung(_) => {}
             }
         }
     }
     let mut out = Vec::new();
-    walk(&lv.nodes, 0, &mut out, &mut 0);
+    walk(&lv.nodes, 0, &mut out);
     out
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum Sort {
+    Lv,
+    Gp,
+    Text,
+    Open,
+}
+
+impl Sort {
+    const ALL: [(Sort, &'static str); 4] = [
+        (Sort::Lv, "LV-Reihenfolge"),
+        (Sort::Open, "Ohne Preis zuerst"),
+        (Sort::Gp, "Größter Gesamtpreis zuerst"),
+        (Sort::Text, "Kurztext A–Z"),
+    ];
+}
+
+/// Reihenfolge der Zeilen. Außer in LV-Reihenfolge ohne Titel (flache Liste). Sortiert wird
+/// nach dem Stand beim Umschalten, damit Zeilen beim Tippen nicht wegspringen.
+fn ordered(rows: &[Row], sort: Sort) -> Vec<Row> {
+    if sort == Sort::Lv {
+        return rows.to_vec();
+    }
+    let mut ps: Vec<PosRow> = rows
+        .iter()
+        .filter_map(|r| match r {
+            Row::Pos(p) => Some(p.clone()),
+            Row::Title { .. } => None,
+        })
+        .collect();
+    match sort {
+        Sort::Gp => ps.sort_by_key(|p| std::cmp::Reverse(p.gp.get_untracked())),
+        Sort::Text => ps.sort_by_cached_key(|p| p.kurztext.to_lowercase()),
+        Sort::Open => ps.sort_by_key(|p| p.saved.get_untracked().is_some()),
+        Sort::Lv => {}
+    }
+    ps.into_iter().map(Row::Pos).collect()
 }
 
 fn art_label(art: PositionsArt) -> Option<&'static str> {
@@ -294,16 +335,36 @@ fn art_label(art: PositionsArt) -> Option<&'static str> {
     }
 }
 
-fn focus_ep(idx: usize) {
-    let el = web_sys::window()
+fn phase_label(phase: u8) -> &'static str {
+    match phase {
+        84 => "Angebot",
+        85 => "Nebenangebot",
+        86 => "Auftrag",
+        _ => "Abgabe",
+    }
+}
+
+/// Springt zum nächsten (oder vorigen) sichtbaren EP-Feld, in Bildschirm-Reihenfolge.
+fn focus_step(cur: &web_sys::HtmlInputElement, forward: bool) {
+    let Some(list) = web_sys::window()
         .and_then(|w| w.document())
-        .and_then(|d| {
-            d.query_selector(&format!("input.ep[data-idx=\"{idx}\"]"))
-                .ok()
-                .flatten()
-        })
-        .and_then(|e| e.dyn_into::<web_sys::HtmlInputElement>().ok());
-    if let Some(el) = el {
+        .and_then(|d| d.query_selector_all("input.ep").ok())
+    else {
+        return;
+    };
+    let inputs: Vec<web_sys::HtmlInputElement> = (0..list.length())
+        .filter_map(|i| list.item(i)?.dyn_into().ok())
+        .filter(|e: &web_sys::HtmlInputElement| e.offset_parent().is_some())
+        .collect();
+    let Some(pos) = inputs.iter().position(|e| e == cur) else {
+        return;
+    };
+    let next = if forward {
+        inputs.get(pos + 1)
+    } else {
+        pos.checked_sub(1).and_then(|i| inputs.get(i))
+    };
+    if let Some(el) = next {
         let _ = el.focus();
         el.select();
     }
@@ -327,6 +388,8 @@ fn LvEditor(id: String) -> impl IntoView {
     let load_error = RwSignal::new(None::<String>);
     let save_error = RwSignal::new(None::<String>);
     let only_open = RwSignal::new(false);
+    let query = RwSignal::new(String::new());
+    let sort = RwSignal::new(Sort::Lv);
     let export_state = RwSignal::new(ExportState::Idle);
     // Frühere Preise je OZ; kommen nach dem LV, die Tabelle wartet nicht darauf.
     let suggestions = RwSignal::new(std::collections::HashMap::<Oz, Vec<PriceRef>>::new());
@@ -498,78 +561,184 @@ fn LvEditor(id: String) -> impl IntoView {
         });
     };
 
-    let render_row = move |row: Row| match row {
+    let take_price = {
+        let enqueue = enqueue.clone();
+        move |p: &PosRow, ep: Decimal| {
+            p.ep_text.set(fmt_de(ep, 2));
+            enqueue(p);
+        }
+    };
+
+    let render_row = move |row: Row| {
+        match row {
         Row::Title { depth, oz, label } => view! {
-            <tr class=format!("title d{}", depth.min(3))>
-                <td>{oz}</td><td colspan="6">{label}</td>
+            <tr class=format!("title d{}", depth.min(3))
+                style:display=move || if query.with(|q| !q.trim().is_empty()) || only_open.get() { "none" } else { "" }>
+                <td class="oz">{oz}</td><td colspan="6">{label}</td>
             </tr>
         }
         .into_any(),
         Row::Pos(p) => {
             let enqueue = enqueue.clone();
-            let (p1, p2, p3, p4, p5) = (p.clone(), p.clone(), p.clone(), p.clone(), p.clone());
+            let take_price = take_price.clone();
             let counts = p.art.counts_towards_total();
-            let has_long = !p.langtext.is_empty();
-            let idx = p.idx;
+            let open = p.open;
+            let hidden = {
+                let p = p.clone();
+                move || {
+                    (only_open.get() && p.saved.get().is_some())
+                        || query.with(|q| {
+                            let q = q.trim().to_lowercase();
+                            !q.is_empty() && !q.split_whitespace().all(|w| p.hay.contains(w))
+                        })
+                }
+            };
+            let hidden2 = hidden.clone();
+            let refs_of = {
+                let oz = p.oz.clone();
+                move || suggestions.with(|m| m.get(&oz).cloned().unwrap_or_default())
+            };
+            let refs_of2 = refs_of.clone();
+            let (p_main, p_hist, p_detail) = (p.clone(), p.clone(), p.clone());
             view! {
                 <tr class="pos"
-                    class:priced=move || p1.saved.get().is_some()
-                    style:display=move || if only_open.get() && p2.saved.get().is_some() { "none" } else { "" }>
+                    class:priced={ let p = p.clone(); move || p.saved.get().is_some() }
+                    class:open=move || open.get()
+                    style:display=move || if hidden() { "none" } else { "" }>
                     <td class="oz">{p.oz.to_string()}</td>
-                    <td class="text" class:click=has_long on:click=move |_| if has_long { p3.open.update(|o| *o = !*o) }>
-                        {art_label(p.art).map(|l| view! { <span class="badge">{l}</span>" " })}
-                        {p.kurztext.clone()}
-                        {move || (p4.open.get()).then(|| view! { <div class="long">{p4.langtext.clone()}</div> })}
+                    <td class="text click" title="Klicken für Langtext und frühere Preise"
+                        on:click=move |_| open.update(|o| *o = !*o)>
+                        <div class="kt">
+                            {art_label(p.art).map(|l| view! { <span class="badge">{l}</span>" " })}
+                            {p.kurztext.clone()}
+                        </div>
+                        {(!p.langtext.is_empty()).then(|| {
+                            let lt = p.langtext.clone();
+                            view! { <div class="lt-preview" class:hidden=move || open.get()>{lt}</div> }
+                        })}
                     </td>
                     <td class="num">{p.menge.map(|m| fmt_de(m, 0)).unwrap_or_default()}</td>
-                    <td>{p.einheit.clone()}</td>
+                    <td class="unit">{p.einheit.clone()}</td>
                     <td class="num">
-                        <input class="ep" data-idx=idx inputmode="decimal" placeholder="—"
-                            class:err=move || matches!(p.state.get(), SaveState::Error(_))
-                            title=move || match p.state.get() { SaveState::Error(m) => m, _ => String::new() }
-                            prop:value=move || p.ep_text.get()
-                            on:input:target=move |ev| p.ep_text.set(ev.target().value())
+                        <input class="ep" inputmode="decimal" placeholder="—"
+                            class:err={ let s = p.state; move || matches!(s.get(), SaveState::Error(_)) }
+                            title={ let s = p.state; move || match s.get() { SaveState::Error(m) => m, _ => String::new() } }
+                            prop:value={ let t = p.ep_text; move || t.get() }
+                            on:input:target={ let t = p.ep_text; move |ev| t.set(ev.target().value()) }
                             on:change={
-                                let (enqueue, p) = (enqueue.clone(), p.clone());
+                                let (enqueue, p) = (enqueue.clone(), p_main.clone());
                                 move |_| enqueue(&p)
                             }
-                            on:keydown=move |ev| {
-                                if ev.key() == "Enter" {
-                                    ev.prevent_default();
-                                    focus_ep(idx + 1);
-                                }
+                            on:keydown:target=move |ev| {
+                                let forward = match ev.key().as_str() {
+                                    "Enter" => !ev.shift_key(),
+                                    "ArrowDown" => true,
+                                    "ArrowUp" => false,
+                                    _ => return,
+                                };
+                                ev.prevent_default();
+                                focus_step(&ev.target(), forward);
                             }/>
                     </td>
                     <td class="num hist">
                         {
-                            let (p, enqueue) = (p5.clone(), enqueue.clone());
-                            move || suggestions.with(|m| m.get(&p.oz).and_then(|refs| refs.first().cloned()).map(|best| {
-                                let all = suggestions.with(|m| m.get(&p.oz).cloned().unwrap_or_default());
-                                let title = all.iter().map(|r| format!("{} € / {} – {} – {} ({}, {} %)",
-                                    money(r.ep), r.einheit.clone().unwrap_or_default(), r.kurztext, r.lv_name,
-                                    r.date.format("%Y"), (r.similarity * 100.0).round())).collect::<Vec<_>>().join("\n");
-                                let (p, enqueue) = (p.clone(), enqueue.clone());
-                                view! {
-                                    <button class="hist-btn" title=title on:click=move |_| {
-                                        p.ep_text.set(fmt_de(best.ep, 2));
-                                        enqueue(&p);
-                                    }>{format!("{} · {}", money(best.ep), best.date.format("%Y"))}</button>
-                                }
-                            }))
+                            let (p, take_price) = (p_hist.clone(), take_price.clone());
+                            move || {
+                                let refs = refs_of();
+                                let best = refs.first().cloned()?;
+                                let (p, take_price) = (p.clone(), take_price.clone());
+                                let more = refs.len().saturating_sub(1);
+                                Some(view! {
+                                    <button class="hist-btn" title="Diesen früheren Preis übernehmen"
+                                        on:click=move |_| take_price(&p, best.ep)>
+                                        {format!("{} € · {}", money(best.ep), best.date.format("%Y"))}
+                                    </button>
+                                    <button class="link small hist-more" on:click=move |_| open.update(|o| *o = !*o)>
+                                        {move || if open.get() { "weniger".to_owned() }
+                                            else if more > 0 { format!("+{more} weitere") } else { "Details".to_owned() }}
+                                    </button>
+                                })
+                            }
                         }
                     </td>
                     <td class="num gp" class:muted=!counts>
-                        {move || match (p.state.get(), p.gp.get()) {
-                            (SaveState::Pending, _) => view! { <span class="spinner sm"></span> }.into_any(),
-                            (_, Some(gp)) if counts => money(gp).into_any(),
-                            (_, Some(gp)) => format!("({})", money(gp)).into_any(),
-                            _ => "".into_any(),
-                        }}
+                        {
+                            let (s, g) = (p.state, p.gp);
+                            move || match (s.get(), g.get()) {
+                                (SaveState::Pending, _) => view! { <span class="spinner sm"></span> }.into_any(),
+                                (_, Some(gp)) if counts => money(gp).into_any(),
+                                (_, Some(gp)) => format!("({})", money(gp)).into_any(),
+                                _ => "".into_any(),
+                            }
+                        }
                     </td>
                 </tr>
+                {move || (open.get() && !hidden2()).then(|| {
+                    let p = p_detail.clone();
+                    let refs = refs_of2();
+                    let take_price = take_price.clone();
+                    let range = (!refs.is_empty()).then(|| {
+                        let min = refs.iter().map(|r| r.ep).min().unwrap_or_default();
+                        let max = refs.iter().map(|r| r.ep).max().unwrap_or_default();
+                        let avg = refs.iter().map(|r| r.ep).sum::<Decimal>() / Decimal::from(refs.len());
+                        format!("Spanne {} – {} €, Mittel {} €", money(min), money(max), money(avg))
+                    });
+                    view! {
+                        <tr class="detail">
+                            <td></td>
+                            <td colspan="6">
+                                <div class="lt-full">{if p.langtext.is_empty() { "Kein Langtext.".to_owned() } else { p.langtext.clone() }}</div>
+                                <div class="hist-head">
+                                    <strong>"Frühere Preise für ähnliche Positionen"</strong>
+                                    {range.map(|r| view! { <span class="muted small">" · "{r}</span> })}
+                                </div>
+                                {if refs.is_empty() {
+                                    view! { <p class="muted small">"Keine ähnliche Position mit gleicher Einheit in der Preis-Historie."</p> }.into_any()
+                                } else {
+                                    view! {
+                                        <table class="hist-table">
+                                            <thead><tr>
+                                                <th class="num">"EP €"</th><th class="num">"Menge"</th><th>"Kurztext damals"</th>
+                                                <th>"Projekt / LV"</th><th>"Art"</th><th>"Datum"</th>
+                                                <th class="num" title="Ähnlichkeit der Kurztexte">"Ähnl."</th><th></th>
+                                            </tr></thead>
+                                            <tbody>
+                                                {refs.into_iter().map(|r| {
+                                                    let (p, take_price, ep) = (p.clone(), take_price.clone(), r.ep);
+                                                    view! {
+                                                        <tr>
+                                                            <td class="num"><strong>{money(r.ep)}</strong>{format!(" / {}", r.einheit.clone().unwrap_or_default())}</td>
+                                                            <td class="num">{r.menge.map(|m| fmt_de(m, 0)).unwrap_or_default()}</td>
+                                                            <td>{r.kurztext.clone()}</td>
+                                                            <td title=r.path.clone()>{r.lv_name.clone()}<div class="muted small path">{r.path.clone()}</div></td>
+                                                            <td>{phase_label(r.phase)}</td>
+                                                            <td>{r.date.format("%m/%Y").to_string()}</td>
+                                                            <td class="num">{format!("{} %", (r.similarity * 100.0).round())}</td>
+                                                            <td><button class="btn secondary sm" on:click=move |_| take_price(&p, ep)>"Übernehmen"</button></td>
+                                                        </tr>
+                                                    }
+                                                }).collect_view()}
+                                            </tbody>
+                                        </table>
+                                    }.into_any()
+                                }}
+                            </td>
+                        </tr>
+                    }
+                })}
             }
             .into_any()
         }
+    }
+    };
+
+    let progress = move || {
+        summary.with(|s| {
+            s.as_ref()
+                .filter(|s| s.positions > 0)
+                .map(|s| s.priced as f64 * 100.0 / s.positions as f64)
+                .unwrap_or(0.0)
+        })
     };
 
     view! {
@@ -583,6 +752,7 @@ fn LvEditor(id: String) -> impl IntoView {
                 <div class="totals">
                     <div class="sum">{move || summary.get().map(|s| format!("{} €", money(s.total)))}</div>
                     <div class="muted small">{move || summary.get().map(|s| format!("netto · {} von {} Positionen bepreist", s.priced, s.positions))}</div>
+                    <div class="progress"><div style:width=move || format!("{:.1}%", progress())></div></div>
                 </div>
             </div>
             {move || load_error.get().map(|m| view! {
@@ -597,21 +767,35 @@ fn LvEditor(id: String) -> impl IntoView {
                 </details>
             })}
             <div class="row toolbar">
+                <input class="search" type="search" placeholder="Suchen: OZ oder Text …"
+                    prop:value=move || query.get()
+                    on:input:target=move |ev| query.set(ev.target().value())/>
+                <select class="sort" on:change:target=move |ev| {
+                    let i: usize = ev.target().value().parse().unwrap_or(0);
+                    sort.set(Sort::ALL.get(i).map_or(Sort::Lv, |s| s.0));
+                }>
+                    {Sort::ALL.iter().enumerate().map(|(i, (s, label))| {
+                        let s = *s;
+                        view! { <option value=i.to_string() selected=move || sort.get() == s>{*label}</option> }
+                    }).collect_view()}
+                </select>
+                <label class="check"><input type="checkbox" prop:checked=move || only_open.get()
+                    on:change:target=move |ev| only_open.set(ev.target().checked())/>" nur ohne Preis"</label>
+                <span class="grow"></span>
+                {move || in_flight.get().then(|| view! { <span class="muted small"><span class="spinner sm"></span>" speichert …"</span> })}
                 {move || exports.get().into_iter().map(|f| {
                     let label = match f {
-                        ExportFormat::X84 => "Abgabe X84 erzeugen",
-                        ExportFormat::D84 => "Abgabe D84 erzeugen",
-                        ExportFormat::Xlsx => "Excel erzeugen",
+                        ExportFormat::X84 => "Abgabe X84",
+                        ExportFormat::D84 => "Abgabe D84",
+                        ExportFormat::Xlsx => "Excel",
                     };
                     view! {
                         <button class="btn" class:secondary=f == ExportFormat::Xlsx
+                            title="Datei erzeugen und im Download-Ordner speichern"
                             disabled=move || in_flight.get() || matches!(export_state.get(), ExportState::Running(_))
                             on:click=move |_| run_export(f)>{label}</button>
                     }
                 }).collect_view()}
-                <label class="check"><input type="checkbox" prop:checked=move || only_open.get()
-                    on:change:target=move |ev| only_open.set(ev.target().checked())/>" nur ohne Preis"</label>
-                {move || in_flight.get().then(|| view! { <span class="muted small"><span class="spinner sm"></span>" speichert …"</span> })}
             </div>
             {move || match export_state.get() {
                 ExportState::Idle => None,
@@ -627,6 +811,7 @@ fn LvEditor(id: String) -> impl IntoView {
                                 let path = path.clone();
                                 spawn_local(async move { let _ = tauri::show_in_folder(&path).await; });
                             }>"Im Ordner zeigen"</button>
+                            " "<button class="btn secondary" on:click=move |_| export_state.set(ExportState::Idle)>"Ausblenden"</button>
                             {(missing > 0).then(|| view! {
                                 <div class="warn-line">{format!("{missing} Positionen ohne Preis: {}{}",
                                     saved.missing_prices.iter().take(8).cloned().collect::<Vec<_>>().join(", "),
@@ -636,18 +821,23 @@ fn LvEditor(id: String) -> impl IntoView {
                     }.into_any())
                 }
             }}
-            <table class="lv">
-                <thead><tr>
-                    <th>"OZ"</th><th>"Kurztext"</th><th class="num">"Menge"</th><th>"Einheit"</th>
-                    <th class="num">"EP €"</th>
-                    <th class="num" title="Früherer Einheitspreis zu einer ähnlichen Position aus den GAEB-Abgaben im Archiv; Klick übernimmt ihn">"Früher"</th>
-                    <th class="num">"GP €"</th>
-                </tr></thead>
-                <tbody>
-                    {move || rows.get().into_iter().map(render_row.clone()).collect_view()}
-                </tbody>
-            </table>
-            {move || summary.get().is_none().then(|| view! { <p class="muted"><span class="spinner"></span>" Lade …"</p> })}
+            <div class="lv-wrap">
+                <table class="lv">
+                    <thead><tr>
+                        <th>"OZ"</th><th>"Leistung"</th><th class="num">"Menge"</th><th>"Einh."</th>
+                        <th class="num" title="Einheitspreis. Enter oder ↓ springt zur nächsten Position, ↑ zur vorigen.">"EP €"</th>
+                        <th class="num" title="Früherer Einheitspreis zu einer ähnlichen Position aus den GAEB-Abgaben im Archiv; Klick übernimmt ihn">"Früher"</th>
+                        <th class="num">"GP €"</th>
+                    </tr></thead>
+                    <tbody>
+                        {move || {
+                            let s = sort.get();
+                            rows.with(|rs| ordered(rs, s)).into_iter().map(render_row.clone()).collect_view()
+                        }}
+                    </tbody>
+                </table>
+                {move || summary.get().is_none().then(|| view! { <p class="muted"><span class="spinner"></span>" Lade …"</p> })}
+            </div>
         </div>
     }
 }

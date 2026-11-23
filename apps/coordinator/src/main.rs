@@ -50,6 +50,8 @@ enum Command {
     /// Desktop-Releases (für Veröffentlichungen per SSH, ohne Anmeldung im Admin-Panel).
     #[command(subcommand)]
     Release(ReleaseCommand),
+    /// Frage an den Dokumenten-Chatbot stellen und Antwort samt Quellen ausgeben (zum Prüfen per SSH).
+    Ask { question: String },
 }
 
 #[derive(Subcommand)]
@@ -128,7 +130,29 @@ async fn main() -> anyhow::Result<()> {
         }
         Command::Admin(cmd) => admin_command(&database_url, cmd).await,
         Command::Release(cmd) => release_command(&database_url, cmd).await,
+        Command::Ask { question } => ask(&database_url, &question).await,
     }
+}
+
+async fn ask(database_url: &str, question: &str) -> anyhow::Result<()> {
+    let cfg = Config::from_env()?;
+    let pool = db::connect(database_url).await?;
+    let bot = build_chatbot(&cfg, &pool)
+        .await
+        .context("Chatbot nicht verfügbar (Feature `embed` oder Modell fehlt)")?;
+    let resp = bot.answer(question, &[]).await?;
+    println!("{}\n", resp.answer);
+    for (i, s) in resp.sources.iter().enumerate() {
+        println!(
+            "[{}] {} S. {:?} ({:.4})\n    {}",
+            i + 1,
+            s.path,
+            s.page,
+            s.score,
+            s.snippet
+        );
+    }
+    Ok(())
 }
 
 async fn release_command(database_url: &str, cmd: ReleaseCommand) -> anyhow::Result<()> {

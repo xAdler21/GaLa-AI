@@ -240,6 +240,10 @@ pub async fn lv_export(id: &str, format: &str) -> Res<SavedExport> {
     call("lv_export", &ExportArgs { id, format }).await
 }
 
+pub async fn open_web_panel() -> Res<()> {
+    call("open_web_panel", &NoArgs {}).await
+}
+
 pub async fn show_in_folder(path: &str) -> Res<()> {
     call("show_in_folder", &PathArg { path }).await
 }

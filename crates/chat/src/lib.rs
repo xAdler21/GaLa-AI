@@ -99,9 +99,14 @@ impl<E: Embedder, S: Search, L: Llm> ChatService<E, S, L> {
         question: &str,
         history: &[ChatTurn],
     ) -> Result<ChatResponse, ChatError> {
-        let embeddings = self.embedder.embed(&[question.to_string()])?;
+        // Rückfragen („und 2020?“) allein finden nichts; die vorige Frage gibt den Zusammenhang.
+        let query = match history.last() {
+            Some(t) => format!("{} {question}", t.question),
+            None => question.to_string(),
+        };
+        let embeddings = self.embedder.embed(std::slice::from_ref(&query))?;
         let embedding = embeddings.into_iter().next().unwrap_or_default();
-        let hits = self.search.search(question, embedding, TOP_K).await?;
+        let hits = self.search.search(&query, embedding, TOP_K).await?;
         if hits.is_empty() {
             return Ok(ChatResponse {
                 answer: NOT_FOUND.to_string(),
@@ -140,13 +145,7 @@ impl<E: Embedder, S: Search, L: Llm> ChatService<E, S, L> {
     }
 }
 
-pub const SYSTEM_PROMPT: &str = "Du bist der Dokumenten-Assistent eines GaLaBau-Betriebs. \
-Beantworte die Frage ausschließlich anhand der unten nummerierten Quellen aus den Firmendokumenten. \
-Zitiere die verwendeten Quellen im Text als [1], [2] usw. \
-Erfinde nichts und nutze kein Wissen außerhalb der Quellen. \
-Wenn die Quellen die Frage nicht beantworten, antworte genau mit: \
-\"Dazu habe ich in den Dokumenten nichts gefunden.\" \
-Antworte auf Deutsch, knapp und sachlich. Preise, Mengen und Daten gibst du genau so wieder, wie sie in den Quellen stehen.";
+pub const SYSTEM_PROMPT: &str = "Du bist der Dokumenten-Assistent eines GaLaBau-Betriebs. Du bekommst nummerierte Auszüge aus den Firmendokumenten (Angebote, Leistungsverzeichnisse, Rechnungen, Schriftverkehr, Bautagebücher). Viele sind eingescannt und per Texterkennung gelesen, also nicht fehlerfrei. Der Pfad vor jedem Auszug nennt meist Jahr, Auftraggeber und Projekt. Beantworte die Frage konkret aus diesen Auszügen: Nenne Preise, Mengen, Daten, Firmen und Projekte genau so, wie sie dort stehen, und setze hinter jede Aussage die Quelle als [1], [2] usw. Passen mehrere Projekte oder Jahre, liste sie einzeln auf. Beantworten die Auszüge die Frage nur teilweise, sage, was du gefunden hast und was fehlt. Nur wenn kein Auszug zur Frage passt, antworte genau mit: \"Dazu habe ich in den Dokumenten nichts gefunden.\" Erfinde nichts und nutze kein Wissen außerhalb der Auszüge. Antworte auf Deutsch.";
 
 /// llama-server lehnt Anfragen über der Kontextgröße mit 400 ab.
 fn is_context_overflow(e: &ChatError) -> bool {
@@ -172,12 +171,52 @@ pub fn build_messages(question: &str, history: &[ChatTurn], hits: &[Hit]) -> Vec
         user.push_str(&format!(
             "\n[{}] {place}\n{}\n",
             i + 1,
-            truncate_chars(hit.text.trim(), PROMPT_CHARS_PER_SOURCE)
+            truncate_chars(&clean(&hit.text), PROMPT_CHARS_PER_SOURCE)
         ));
     }
     user.push_str(&format!("\nFrage: {question}"));
     messages.push(ChatMessage::user(user));
     messages
+}
+
+/// Füllpunkte („........“) und Leerraum-Läufe aus OCR/LV-Text kosten nur Kontext.
+fn clean(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut leader = String::new();
+    let flush = |out: &mut String, leader: &mut String| {
+        if leader.chars().count() >= 3 {
+            if !out.ends_with(' ') {
+                out.push(' ');
+            }
+            out.push_str("… ");
+        } else {
+            out.push_str(leader);
+        }
+        leader.clear();
+    };
+    for c in text.trim().chars() {
+        if matches!(c, '.' | '_' | '…') {
+            leader.push(c);
+            continue;
+        }
+        flush(&mut out, &mut leader);
+        if c == ' ' || c == '\t' {
+            if !out.ends_with([' ', '\n']) {
+                out.push(' ');
+            }
+        } else if c == '\n' {
+            while out.ends_with(' ') {
+                out.pop();
+            }
+            if !out.ends_with("\n\n") {
+                out.push('\n');
+            }
+        } else {
+            out.push(c);
+        }
+    }
+    flush(&mut out, &mut leader);
+    out.trim_end().to_owned()
 }
 
 fn to_source(hit: &Hit) -> ChatSource {
@@ -334,6 +373,14 @@ mod tests {
         // System + 4 Runden à 2 + Frage
         assert_eq!(msgs.len(), 1 + 8 + 1);
         assert_eq!(msgs[1].content, "f6");
+    }
+
+    #[test]
+    fn clean_drops_leaders_and_blank_runs() {
+        assert_eq!(
+            clean("Pos 1.2   Pflaster ........ 12,50 €\n\n\n\nSumme ___ z.B. a_b Ende..."),
+            "Pos 1.2 Pflaster … 12,50 €\n\nSumme … z.B. a_b Ende …"
+        );
     }
 
     #[test]

@@ -324,6 +324,7 @@ Ein Platzcheck: `sudo /bin/bash /opt/gala/deploy/common/disk.sh report` (entspri
 - **Denkphase:** Qwen3 „denkt“ standardmäßig vor jeder Antwort. Diese Tokens zählen zu `max_tokens` des Aufrufers (Chatbot: 1024) und kosten Zeit; deshalb startet llama-server mit `--reasoning off` (`LLM_REASONING` in `llm.env`).
 - **Stand 20.11.2026:** Qwen3-14B Q4_K_M auf Build `server-cuda-b12464`, Layer-Split `1,1`, `LLM_CTX=16384`: je Karte rund 5,7 von 8 GB belegt, etwa 22–25 Token/s beim Generieren. Mit den freien 2 GB je Karte ließe sich der Kontext ungefähr verdoppeln (`LLM_CTX=32768`), falls der Chatbot mehr Quellen mitschicken soll.
 - Test: `curl http://gala-llm:8080/health` von gala-coordinator aus; von einer anderen IP aus muss die Verbindung scheitern.
+- Chatbot ohne App prüfen (Antwort und Quellen mit Score): `sudo /opt/gala/deploy/common/dc.sh coordinator exec coordinator coordinator ask "Was hat das Pflaster bei der Kinderkrippe Pentling gekostet?"`.
 
 ### 8.3 gala-ocr: OCR auf der CPU
 

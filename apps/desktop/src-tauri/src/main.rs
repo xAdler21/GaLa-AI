@@ -37,6 +37,20 @@ fn app_info(app: AppHandle) -> AppInfo {
     }
 }
 
+/// Oeffnet das Web-Panel (Admin) des eingerichteten Servers im Standard-Browser.
+#[tauri::command]
+fn open_web_panel(app: AppHandle) -> CmdResult<()> {
+    let base = net::require_server(&app)?;
+    if !base.starts_with("https://") && !base.starts_with("http://") {
+        return Err(err("invalid_request", "Ungültige Server-Adresse."));
+    }
+    std::process::Command::new("explorer")
+        .arg(format!("{}/admin", base.trim_end_matches('/')))
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| err("io", format!("Browser nicht startbar: {e}")))
+}
+
 /// Prueft eine (noch nicht gespeicherte) Server-Adresse. Gibt die Health-Antwort zurueck.
 #[tauri::command]
 async fn test_connection(state: State<'_, AppState>, url: String) -> CmdResult<HealthResponse> {
@@ -134,6 +148,7 @@ fn main() {
         .manage(state)
         .invoke_handler(tauri::generate_handler![
             app_info,
+            open_web_panel,
             test_connection,
             install_server_ca,
             save_server_url,
