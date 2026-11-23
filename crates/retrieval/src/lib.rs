@@ -282,7 +282,7 @@ impl PgVectorStore {
         let sparse = sqlx::query(
             "SELECT c.id, d.rel_path, c.page, c.text \
              FROM chunk c JOIN document d ON d.id = c.document_id, \
-                  replace(websearch_to_tsquery('german', $1)::text, ' & ', ' | ')::tsquery q \
+                  (SELECT replace(websearch_to_tsquery('german', $1)::text, ' & ', ' | ')::tsquery) AS qq(q) \
              WHERE c.tsv @@ q \
              ORDER BY ts_rank_cd(c.tsv, q) DESC LIMIT $2",
         )
