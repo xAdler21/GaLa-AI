@@ -132,7 +132,8 @@ Jede VM hat den Linux-Nutzer `claude` mit sudo (NOPASSWD). Den Schlüssel liefer
 
 ### Preis-Historie (Tabelle `price_ref`)
 - Der Worker (Rolle `cpu`) schreibt beim Extrahieren einer GAEB-Datei der Phase 84–86 deren Einheitspreise (Positionen mit Kurztext und EP > 0). Fehlen einer D84 die Texte, kommen sie aus einer Ausschreibung (D8x/X8x) im selben Ordner oder eine Ebene darüber, Zuordnung über die OZ.
-- Vorschläge: Trigramm-Ähnlichkeit (`pg_trgm`, ab 0,3) des Kurztexts, gleiche Einheit, je Position höchstens 5.
+- PDF-Angebote (Dateiname mit „Angebot“, ohne Lieferantenordner): sobald das Dokument fertig indiziert ist (auch OCR-Seiten), liest `ingest::pdf_prices` den AVA-Druck aus den Chunks (OZ + Kurztext, Mengenzeile `Menge Einheit EP [GP]`, GP muss zu Menge × EP passen). Nachholen für schon indizierte PDFs: `worker --backfill-pdf-prices`.
+- Vorschläge: Trigramm-Ähnlichkeit (`pg_trgm`, ab 0,3) des Kurztexts, gleiche Einheit, je Position höchstens 5; gleicher Kurztext zum gleichen Preis zählt einmal.
 
 ### Migrationen
 `crates/db/migrations/`, Nummernkreise siehe `crates/db/src/lib.rs`.

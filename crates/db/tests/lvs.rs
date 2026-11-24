@@ -94,6 +94,7 @@ async fn price_history_similar() {
     sqlx::query(
         "INSERT INTO price_ref (document_id, phase, lv_name, oz, kurztext, einheit, ep) VALUES \
          ($1, 84, 'Kita', '01.0010', 'Betonpflaster 8 cm verlegen', 'm2', 45.5), \
+         ($1, 84, 'Kita', '01.0011', 'Betonpflaster 8 cm verlegen', 'm2', 45.5), \
          ($1, 84, 'Kita', '01.0020', 'Rasen ansäen', 'm2', 3.2)",
     )
     .bind(doc)
@@ -112,6 +113,14 @@ async fn price_history_similar() {
     .unwrap();
     assert!(
         hits.iter().any(|h| h.query_idx == 1 && h.ep == "45.5"),
+        "{hits:?}"
+    );
+    // Gleicher Kurztext zum gleichen Preis zählt einmal.
+    assert_eq!(
+        hits.iter()
+            .filter(|h| h.query_idx == 1 && h.kurztext == "Betonpflaster 8 cm verlegen")
+            .count(),
+        1,
         "{hits:?}"
     );
     assert!(hits.iter().all(|h| h.query_idx != 2 || h.similarity >= 0.3));

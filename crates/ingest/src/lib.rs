@@ -11,6 +11,7 @@ use std::path::PathBuf;
 
 pub mod chunk;
 pub mod extract;
+pub mod pdf_prices;
 pub mod scan;
 pub mod store;
 pub mod tiff;

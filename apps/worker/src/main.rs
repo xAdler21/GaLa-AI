@@ -59,6 +59,9 @@ struct Args {
     /// Parallele Aufgaben dieses Prozesses.
     #[arg(long, default_value_t = 1)]
     concurrency: usize,
+    /// Preise aus allen schon indizierten PDF-Angeboten auslesen und beenden.
+    #[arg(long)]
+    backfill_pdf_prices: bool,
     /// Verzeichnis mit der PDFium-Bibliothek (sonst Systembibliothek).
     #[arg(long, env = "PDFIUM_DIR")]
     pdfium_dir: Option<PathBuf>,
@@ -208,6 +211,11 @@ async fn main() -> anyhow::Result<()> {
 
     let pool = db::connect(database_url).await?;
     db::migrate(&pool).await?;
+    if args.backfill_pdf_prices {
+        let (docs, prices) = ingest::store::backfill_pdf_prices(&pool).await?;
+        tracing::info!(dokumente = docs, preise = prices, "PDF-Preise ausgelesen");
+        return Ok(());
+    }
 
     let stop = CancellationToken::new();
     tokio::spawn({

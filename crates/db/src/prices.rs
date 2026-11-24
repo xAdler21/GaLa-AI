@@ -19,7 +19,8 @@ pub struct PriceHit {
 }
 
 /// Je Suchtext die `per_query` ähnlichsten Kurztexte (Trigramm-Ähnlichkeit ab 0,3), in einer
-/// Abfrage für das ganze LV.
+/// Abfrage für das ganze LV. Gleicher Kurztext mit gleichem Preis (GAEB und PDF desselben
+/// Angebots, mehrere Fassungen) zählt nur einmal, mit dem neuesten Dokument.
 pub async fn similar(
     pool: &PgPool,
     texts: &[String],
@@ -30,11 +31,15 @@ pub async fn similar(
                 r.rel_path, r.mtime, r.similarity \
          FROM unnest($1::text[]) WITH ORDINALITY AS q(t, ord) \
          CROSS JOIN LATERAL ( \
-             SELECT p.ep::text AS ep, p.menge::text AS menge, p.einheit, p.kurztext, p.lv_name, p.phase, \
-                    d.rel_path, d.mtime, similarity(p.kurztext, q.t)::float4 AS similarity \
-             FROM price_ref p JOIN document d ON d.id = p.document_id \
-             WHERE p.kurztext % q.t \
-             ORDER BY similarity DESC, d.mtime DESC \
+             SELECT * FROM ( \
+                 SELECT DISTINCT ON (p.kurztext, p.ep, p.einheit) \
+                        p.ep::text AS ep, p.menge::text AS menge, p.einheit, p.kurztext, p.lv_name, p.phase, \
+                        d.rel_path, d.mtime, similarity(p.kurztext, q.t)::float4 AS similarity \
+                 FROM price_ref p JOIN document d ON d.id = p.document_id \
+                 WHERE p.kurztext % q.t \
+                 ORDER BY p.kurztext, p.ep, p.einheit, d.mtime DESC \
+             ) u \
+             ORDER BY similarity DESC, mtime DESC \
              LIMIT $2 \
          ) r",
     )

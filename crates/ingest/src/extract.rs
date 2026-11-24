@@ -144,7 +144,7 @@ pub struct PriceRow {
 }
 
 /// Langtexte werden für die Historie gekürzt; zum Wiedererkennen reicht der Anfang.
-const PRICE_LANGTEXT_MAX: usize = 2000;
+pub(crate) const PRICE_LANGTEXT_MAX: usize = 2000;
 
 /// Wie [`extract_gaeb`], liefert bei Abgaben (Phase 84–86) zusätzlich die Einheitspreise.
 pub fn extract_gaeb_with_prices(

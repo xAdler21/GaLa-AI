@@ -536,3 +536,50 @@ pub async fn replace_price_refs(
     tx.commit().await?;
     Ok(rows.len())
 }
+
+/// Preise eines fertig indizierten PDF-Angebots neu auslesen (aus den Chunks, also inklusive
+/// OCR-Seiten). Andere PDFs verlieren dabei eventuell alte Einträge.
+pub async fn refresh_pdf_prices(pool: &PgPool, id: Uuid) -> Result<usize, IngestError> {
+    let Some(info) = document_info(pool, id).await? else {
+        return Ok(0);
+    };
+    if info.kind != DocKind::Pdf {
+        return Ok(0);
+    }
+    let rows = if crate::pdf_prices::is_offer_path(&info.rel_path) {
+        let chunks: Vec<(Option<i32>, String)> =
+            sqlx::query_as("SELECT page, text FROM chunk WHERE document_id = $1 ORDER BY ord")
+                .bind(id)
+                .fetch_all(pool)
+                .await?;
+        let name = info
+            .rel_path
+            .rsplit('/')
+            .next()
+            .unwrap_or(&info.rel_path)
+            .trim_end_matches(".pdf")
+            .trim_end_matches(".PDF");
+        crate::pdf_prices::parse_offer(&crate::pdf_prices::text_from_chunks(&chunks), name)
+    } else {
+        Vec::new()
+    };
+    replace_price_refs(pool, id, &rows).await
+}
+
+/// Alle bereits indizierten PDF-Angebote auswerten (einmalig nach Einführung der PDF-Preise).
+pub async fn backfill_pdf_prices(pool: &PgPool) -> Result<(usize, usize), IngestError> {
+    let ids: Vec<Uuid> = sqlx::query_scalar(
+        "SELECT id FROM document WHERE kind = 'pdf' AND status = 'indexed' AND rel_path ILIKE '%angebot%'",
+    )
+    .fetch_all(pool)
+    .await?;
+    let (mut docs, mut prices) = (0, 0);
+    for id in ids {
+        let n = refresh_pdf_prices(pool, id).await?;
+        if n > 0 {
+            docs += 1;
+            prices += n;
+        }
+    }
+    Ok((docs, prices))
+}

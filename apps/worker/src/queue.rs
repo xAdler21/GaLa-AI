@@ -143,8 +143,21 @@ async fn process<H: Handler>(
             }
         }
     }
-    if let Err(err) = store::finalize_if_idle(&ctx.pool, task.document_id).await {
-        tracing::warn!(dokument = %task.document_id, %err, "Dokument konnte nicht finalisiert werden");
+    match store::finalize_if_idle(&ctx.pool, task.document_id).await {
+        // Erst jetzt liegt der ganze Text vor (auch OCR-Seiten): Preise aus PDF-Angeboten.
+        Ok(true) => match store::refresh_pdf_prices(&ctx.pool, task.document_id).await {
+            Ok(0) => {}
+            Ok(n) => {
+                tracing::info!(dokument = %task.document_id, preise = n, "PDF-Preise in die Historie übernommen")
+            }
+            Err(err) => {
+                tracing::warn!(dokument = %task.document_id, %err, "PDF-Preise nicht auslesbar")
+            }
+        },
+        Ok(false) => {}
+        Err(err) => {
+            tracing::warn!(dokument = %task.document_id, %err, "Dokument konnte nicht finalisiert werden");
+        }
     }
 }
 
