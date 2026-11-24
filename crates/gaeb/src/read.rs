@@ -69,10 +69,16 @@ pub(crate) fn read(xml: &str) -> Result<(GaebImport, Vec<Option<Oz>>), GaebError
             .push(format!("Element <{name}> im LV wird ignoriert"));
     }
 
+    let usable = |n: &&str| !crate::is_software_stamp(n);
     let name = prj
         .and_then(|p| child_text(p, "NamePrj"))
-        .or_else(|| path(boq, &["BoQInfo", "Name"]).and_then(|n| n.text()))
-        .or_else(|| prj.and_then(|p| child_text(p, "LblPrj")))
+        .filter(usable)
+        .or_else(|| {
+            path(boq, &["BoQInfo", "Name"])
+                .and_then(|n| n.text())
+                .filter(usable)
+        })
+        .or_else(|| prj.and_then(|p| child_text(p, "LblPrj")).filter(usable))
         .unwrap_or("GAEB-LV");
     let currency = child_text(award, "Cur")
         .or_else(|| prj.and_then(|p| child_text(p, "Cur")))

@@ -499,6 +499,7 @@ pub(crate) fn read_d90(bytes: &[u8]) -> Result<GaebImport, GaebError> {
     };
     let mut name_lv = String::new();
     let mut name_prj = String::new();
+    let mut prj_seen = false;
     let mut currency = String::new();
     let mut unknown = BTreeSet::new();
 
@@ -510,10 +511,16 @@ pub(crate) fn read_d90(bytes: &[u8]) -> Result<GaebImport, GaebError> {
         match kind.as_str() {
             "00" | "03" | "04" | "06" | "27" | "28" | "30" | "32" | "42" | "77" | "79" | "99"
             | "T9" => {}
-            "01" => name_lv = r.cols(3, 42).trim().to_string(),
+            "01" => name_lv = r.cols(3, 42).trim().trim_end_matches(" -").to_string(),
             "02" => {
-                if name_prj.is_empty() {
-                    name_prj = r.cols(3, 74).trim().to_string();
+                // Nur die erste Zeile zählt; ist sie ein Programmvermerk, enthält der ganze
+                // 02-Block Exportangaben statt der Projektbezeichnung.
+                if !prj_seen {
+                    prj_seen = true;
+                    let line = r.cols(3, 74).trim().to_string();
+                    if !crate::is_software_stamp(&line) {
+                        name_prj = line;
+                    }
                 }
             }
             "08" => currency = r.cols(3, 8).trim().to_string(),
@@ -616,5 +623,31 @@ mod tests {
         assert_eq!(m.oz(" 1 2   3A").unwrap().to_string(), "01.02.0003A");
         let m = Mask::parse("11122PPPP").unwrap();
         assert_eq!(m.oz("01500   1").unwrap().to_string(), "015.00.0001");
+    }
+
+    fn d90(lines: &[&str]) -> Vec<u8> {
+        lines
+            .iter()
+            .enumerate()
+            .map(|(i, l)| format!("{l:<74}{:06}\r\n", i + 1))
+            .collect::<String>()
+            .into_bytes()
+    }
+
+    #[test]
+    fn dataflor_export_note_is_not_the_name() {
+        let head = "00        84                                                  1122PPI0090";
+        let lv = "01Landschaftsbauarbeiten -                29.02.24                     X";
+        let file = d90(&[
+            head,
+            lv,
+            "02 GAEB version used: 320",
+            "02DATAflor GAEB-Import",
+            "02 Benutzer: Bahn, David Datum: 26.02.2024 11:52:06 Dateiname",
+            "99",
+        ]);
+        assert_eq!(read_d90(&file).unwrap().lv.name, "Landschaftsbauarbeiten");
+        let file = d90(&[head, lv, "02Kita Sonnenschein", "99"]);
+        assert_eq!(read_d90(&file).unwrap().lv.name, "Kita Sonnenschein");
     }
 }

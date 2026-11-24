@@ -35,6 +35,19 @@ pub enum GaebError {
     Write(String),
 }
 
+/// Vermerk des exportierenden Programms statt eines LV- oder Projektnamens (DATAflor schreibt
+/// z. B. „GAEB version used: 320“, „DATAflor GAEB-Import“, Benutzer und Dateipfad).
+pub(crate) fn is_software_stamp(name: &str) -> bool {
+    let n = name.trim().to_lowercase();
+    n.is_empty()
+        || n.starts_with("gaeb")
+        || n.contains("dataflor")
+        || n.contains("gaeb-version")
+        || n.starts_with("benutzer:")
+        || n.starts_with(':')
+        || n.contains(":\\")
+}
+
 /// Liest eine GAEB-Datei aus Rohbytes (Kodierung laut BOM bzw. XML-Deklaration).
 ///
 /// Erkennt GAEB 90 (D81–D86, Festformat) am Inhalt und liest es ebenfalls; die Dateiendung
