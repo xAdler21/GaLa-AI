@@ -151,6 +151,27 @@ pub struct PriceSuggestion {
     pub oz: Oz,
     /// Bester Treffer zuerst.
     pub refs: Vec<PriceRef>,
+    /// Einkaufspreise ähnlicher Artikel aus Lieferantenbelegen, gleiche Einheit zuerst.
+    #[serde(default)]
+    pub ek: Vec<EkRef>,
+}
+
+/// Ein Einkaufspreis aus einem Lieferantenangebot oder einer Auftragsbestätigung im Archiv.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct EkRef {
+    /// Netto je Einheit, nach Rabatt.
+    pub ep: Decimal,
+    pub einheit: Option<String>,
+    pub menge: Option<Decimal>,
+    /// Artikelbezeichnung des Lieferanten.
+    pub bezeichnung: String,
+    pub lieferant: String,
+    /// Belegdatum, sonst Änderungsdatum der Datei.
+    pub date: chrono::NaiveDate,
+    /// Pfad im Archiv.
+    pub path: String,
+    /// Ähnlichkeit zum Kurztext, 0–1.
+    pub similarity: f32,
 }
 
 /// Ein früherer Preis aus einer GAEB-Abgabe im Archiv.

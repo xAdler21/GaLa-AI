@@ -156,6 +156,8 @@ pub struct IndexStatusView {
     /// Preis-Historie: Preise und Abgaben, aus denen sie stammen.
     pub prices: i64,
     pub price_docs: i64,
+    /// Einkaufspreise: (gelesene Belege, offene Belege, Preise).
+    pub ek: (i64, i64, i64),
 }
 
 #[derive(Template)]
@@ -357,6 +359,7 @@ mod tests {
             }],
             prices: 3336,
             price_docs: 39,
+            ek: (120, 4069, 950),
         }
     }
 
@@ -374,7 +377,8 @@ mod tests {
         assert!(html.contains("OCR (Seiten)"));
         assert!(html.contains(">41<"));
         assert!(html.contains("ca. 1,1 h"));
-        assert!(html.contains("3336 Preise aus 39 GAEB-Abgaben"));
+        assert!(html.contains("3336 Preise aus 39 Abgaben"));
+        assert!(html.contains("950 Preise aus 120 gelesenen Lieferantenbelegen, 4069 noch offen"));
         assert!(html.contains("Kontext je Slot 16384"));
         assert!(html.contains("context size"));
         assert!(
@@ -405,6 +409,7 @@ mod tests {
                 chats: vec![],
                 prices: 0,
                 price_docs: 0,
+                ek: (0, 0, 0),
             },
         }
         .render()

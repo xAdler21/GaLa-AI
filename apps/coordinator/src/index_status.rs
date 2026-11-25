@@ -34,6 +34,7 @@ pub async fn load(state: &AppState) -> Result<IndexStatusView, db::SqlxError> {
     v.failures = lines(db::index_status::recent_failures(&state.db, 30).await?);
     v.llm = llm_view(state).await;
     (v.prices, v.price_docs) = db::prices::stats(&state.db).await?;
+    v.ek = db::ek::stats(&state.db).await?;
     v.chats = state
         .chat_log
         .recent()
@@ -241,6 +242,7 @@ fn build(
         chats: Vec::new(),
         prices: 0,
         price_docs: 0,
+        ek: (0, 0, 0),
     }
 }
 

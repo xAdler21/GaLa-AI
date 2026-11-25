@@ -6,6 +6,7 @@ mod app;
 mod auth;
 mod chatbot;
 mod config;
+mod ek;
 mod error;
 mod files;
 mod index_status;
@@ -408,6 +409,14 @@ async fn serve(database_url: &str) -> anyhow::Result<()> {
             }
         }
     });
+
+    // Einkaufspreise aus Lieferantenbelegen (LLM, im Hintergrund). `GALA_EK_SCAN=0` schaltet ab,
+    // falls der Chatbot dadurch zu langsam wird.
+    if std::env::var("GALA_EK_SCAN").as_deref() == Ok("0") {
+        tracing::info!("EK-Preise: Auslesen abgeschaltet (GALA_EK_SCAN=0)");
+    } else {
+        tokio::spawn(ek::run(state.db.clone(), cfg.llm_url.clone(), stop.clone()));
+    }
 
     let public_listener = tokio::net::TcpListener::bind(cfg.bind)
         .await

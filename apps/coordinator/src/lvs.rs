@@ -1,7 +1,7 @@
 //! Angebote: LV importieren, Einheitspreise setzen, Abgabe (X84/D84) und Excel exportieren.
 
 use api_types::client::{
-    ExportFormat, LvDetail, LvExport, LvImportRequest, LvSummary, PriceRef, PriceSuggestion,
+    EkRef, ExportFormat, LvDetail, LvExport, LvImportRequest, LvSummary, PriceRef, PriceSuggestion,
     PriceUpdateRequest,
 };
 use axum::extract::rejection::JsonRejection;
@@ -318,6 +318,7 @@ fn group_hits(positions: &[&Position], hits: Vec<db::prices::PriceHit>) -> Vec<P
                 out.push(PriceSuggestion {
                     oz,
                     refs: Vec::new(),
+                    ek: Vec::new(),
                 });
                 out.last_mut().expect("eben angelegt")
             }
@@ -331,6 +332,59 @@ fn group_hits(positions: &[&Position], hits: Vec<db::prices::PriceHit>) -> Vec<P
         }
     }
     out
+}
+
+/// Hängt die Einkaufspreise an. Die Einheit filtert hier nicht (Lieferanten rechnen oft in t
+/// statt m²), sortiert aber: gleiche Einheit zuerst, dann nach Ähnlichkeit.
+fn add_ek(positions: &[&Position], hits: Vec<db::ek::EkHit>, out: &mut Vec<PriceSuggestion>) {
+    for h in hits {
+        let Some(pos) = usize::try_from(h.query_idx - 1)
+            .ok()
+            .and_then(|i| positions.get(i))
+        else {
+            continue;
+        };
+        let Some(oz) = pos.oz.value.clone() else {
+            continue;
+        };
+        let Ok(ep) = h.ep.parse() else { continue };
+        let r = EkRef {
+            ep,
+            menge: h.menge.and_then(|m| m.parse().ok()),
+            einheit: h.einheit,
+            bezeichnung: h.bezeichnung,
+            lieferant: h.lieferant,
+            date: h.belegdatum.unwrap_or_else(|| h.mtime.date_naive()),
+            path: h.rel_path,
+            similarity: h.similarity,
+        };
+        let entry = match out.iter_mut().position(|s| s.oz == oz) {
+            Some(i) => &mut out[i],
+            None => {
+                out.push(PriceSuggestion {
+                    oz,
+                    refs: Vec::new(),
+                    ek: Vec::new(),
+                });
+                out.last_mut().expect("eben angelegt")
+            }
+        };
+        entry.ek.push(r);
+    }
+    for s in out.iter_mut() {
+        let Some(pos) = positions
+            .iter()
+            .find(|p| p.oz.value.as_ref() == Some(&s.oz))
+        else {
+            continue;
+        };
+        s.ek.sort_by(|a, b| {
+            let ua = !same_unit(pos, a.einheit.as_deref());
+            let ub = !same_unit(pos, b.einheit.as_deref());
+            ua.cmp(&ub).then(b.similarity.total_cmp(&a.similarity))
+        });
+        s.ek.truncate(REFS_PER_POSITION);
+    }
 }
 
 async fn suggestions(
@@ -358,7 +412,10 @@ async fn suggestions(
         return Ok(Json(Vec::new()));
     }
     let hits = db::prices::similar(&state.db, &texts, HITS_PER_POSITION).await?;
-    Ok(Json(group_hits(&positions, hits)))
+    let mut out = group_hits(&positions, hits);
+    let ek = db::ek::similar(&state.db, &texts, HITS_PER_POSITION).await?;
+    add_ek(&positions, ek, &mut out);
+    Ok(Json(out))
 }
 
 fn file_stem(name: &str) -> &str {
@@ -549,6 +606,37 @@ mod tests {
         let eps: Vec<String> = out[0].refs.iter().map(|r| r.ep.to_string()).collect();
         assert_eq!(eps, ["3.50", "4.10"]);
         assert_eq!(out[1].refs.len(), 1);
+    }
+
+    #[test]
+    fn ek_attached_same_unit_first() {
+        let mut rasen = Position::new(Oz::parse("01.0010").unwrap(), "Rasen");
+        rasen.einheit = Field::parsed(Unit::parse("qm"), "qm");
+        let ek = |idx: i32, ep: &str, einheit: &str, sim: f32| db::ek::EkHit {
+            query_idx: idx,
+            ep: ep.into(),
+            menge: None,
+            einheit: Some(einheit.into()),
+            bezeichnung: "Rasensaatgut".into(),
+            lieferant: "Saaten GmbH".into(),
+            belegdatum: None,
+            rel_path: "2024/x.pdf".into(),
+            mtime: chrono::Utc::now(),
+            similarity: sim,
+        };
+        let mut out = Vec::new();
+        add_ek(
+            &[&rasen],
+            vec![
+                ek(1, "9.50", "kg", 0.9),
+                ek(1, "0.40", "M2", 0.5),
+                ek(3, "1", "St", 1.0),
+            ],
+            &mut out,
+        );
+        assert_eq!(out.len(), 1);
+        let eps: Vec<String> = out[0].ek.iter().map(|r| r.ep.to_string()).collect();
+        assert_eq!(eps, ["0.40", "9.50"]);
     }
 
     #[test]

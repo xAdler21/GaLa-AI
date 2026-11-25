@@ -110,6 +110,7 @@ Jede VM hat den Linux-Nutzer `claude` mit sudo (NOPASSWD). Den Schlüssel liefer
 | `GALA_INTERNAL_TOKEN` | coordinator, update.sh | Schutz für schreibende `/internal`-Routen |
 | `GALA_ARCHIV_ROOT` | worker | Wurzel des Netzlaufwerks, Standard `/mnt/archiv` |
 | `GALA_LLM_URL` | coordinator, worker | Standard `http://gala-llm:8080` |
+| `GALA_EK_SCAN` | coordinator | `0` schaltet das Auslesen der Einkaufspreise ab (Standard an) |
 | `GALA_EMBED_CACHE_DIR` | coordinator (Feature `embed`), worker (vision) | Modell-Cache für BGE-M3 |
 | `PDFIUM_DIR` | worker | Ordner mit libpdfium, falls nicht systemweit installiert |
 | `GALA_OCR_DEVICE` | worker (vision) | `cpu` (Standard, in `deploy/ocr/compose.yml` fest gesetzt). `cuda` nur mit Feature `worker/cuda` |
@@ -134,6 +135,12 @@ Jede VM hat den Linux-Nutzer `claude` mit sudo (NOPASSWD). Den Schlüssel liefer
 - Der Worker (Rolle `cpu`) schreibt beim Extrahieren einer GAEB-Datei der Phase 84–86 deren Einheitspreise (Positionen mit Kurztext und EP > 0). Fehlen einer D84 die Texte, kommen sie aus einer Ausschreibung (D8x/X8x) im selben Ordner oder eine Ebene darüber, Zuordnung über die OZ.
 - PDF-Angebote (Dateiname mit „Angebot“, ohne Lieferantenordner): sobald das Dokument fertig indiziert ist (auch OCR-Seiten), liest `ingest::pdf_prices` den AVA-Druck aus den Chunks (OZ + Kurztext, Mengenzeile `Menge Einheit EP [GP]`, GP muss zu Menge × EP passen). Nachholen für schon indizierte PDFs: `worker --backfill-pdf-prices`.
 - Vorschläge: Trigramm-Ähnlichkeit (`pg_trgm`, ab 0,3) des Kurztexts, gleiche Einheit, je Position höchstens 5; gleicher Kurztext zum gleichen Preis zählt einmal.
+
+### Einkaufspreise (Tabellen `ek_price`, `ek_scan`)
+- Quelle: PDFs im Lieferantenordner (Angebot, Auftragsbestätigung, Preisliste; keine Lieferscheine).
+- Der Coordinator liest sie im Hintergrund mit dem LLM (ein Beleg nach dem anderen, neueste zuerst, Text auf 12 000 Zeichen gekürzt). Positionen, deren Gesamtpreis nicht zu Menge × EP passt, fallen weg. `ek_scan` merkt sich die gelesene Fassung (sha256); ändert sich die Datei, wird sie neu gelesen.
+- Abschalten: `GALA_EK_SCAN=0` am Coordinator.
+- Vorschläge: `PriceSuggestion.ek`, Trigramm-Ähnlichkeit der Artikelbezeichnung zum Kurztext, Einheit nicht gefiltert (gleiche Einheit zuerst), je Position höchstens 5.
 
 ### Migrationen
 `crates/db/migrations/`, Nummernkreise siehe `crates/db/src/lib.rs`.

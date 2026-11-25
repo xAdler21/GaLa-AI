@@ -1,6 +1,6 @@
 //! Angebote: LV-Liste, Import, Einheitspreise eingeben (speichert sofort), Abgabe exportieren.
 
-use api_types::client::{ExportFormat, LvDetail, LvSummary, PriceEntry, PriceRef};
+use api_types::client::{ExportFormat, LvDetail, LvSummary, PriceEntry, PriceSuggestion};
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use lv_model::number::{NumberLocale, parse_decimal};
@@ -392,7 +392,7 @@ fn LvEditor(id: String) -> impl IntoView {
     let sort = RwSignal::new(Sort::Lv);
     let export_state = RwSignal::new(ExportState::Idle);
     // Frühere Preise je OZ; kommen nach dem LV, die Tabelle wartet nicht darauf.
-    let suggestions = RwSignal::new(std::collections::HashMap::<Oz, Vec<PriceRef>>::new());
+    let suggestions = RwSignal::new(std::collections::HashMap::<Oz, PriceSuggestion>::new());
     // Warteschlange: immer nur eine Speicher-Anfrage unterwegs, sonst kollidieren die Revisionen.
     let queue = ArcStoredValue::new(Vec::<PriceEntry>::new());
     let in_flight = RwSignal::new(false);
@@ -411,7 +411,7 @@ fn LvEditor(id: String) -> impl IntoView {
                     save_error.try_set(None);
                     // Vorschläge sind ein Zusatz: Fehler hier nur protokollieren.
                     if let Ok(list) = tauri::lv_suggestions(&id).await {
-                        suggestions.try_set(list.into_iter().map(|s| (s.oz, s.refs)).collect());
+                        suggestions.try_set(list.into_iter().map(|s| (s.oz.clone(), s)).collect());
                     }
                 }
                 Err(e) => {
@@ -596,9 +596,13 @@ fn LvEditor(id: String) -> impl IntoView {
             let hidden2 = hidden.clone();
             let refs_of = {
                 let oz = p.oz.clone();
-                move || suggestions.with(|m| m.get(&oz).cloned().unwrap_or_default())
+                move || suggestions.with(|m| m.get(&oz).map(|s| s.refs.clone()).unwrap_or_default())
             };
             let refs_of2 = refs_of.clone();
+            let ek_of = {
+                let oz = p.oz.clone();
+                move || suggestions.with(|m| m.get(&oz).map(|s| s.ek.clone()).unwrap_or_default())
+            };
             let (p_main, p_hist, p_detail) = (p.clone(), p.clone(), p.clone());
             view! {
                 <tr class="pos"
@@ -676,6 +680,7 @@ fn LvEditor(id: String) -> impl IntoView {
                 {move || (open.get() && !hidden2()).then(|| {
                     let p = p_detail.clone();
                     let refs = refs_of2();
+                    let ek = ek_of();
                     let take_price = take_price.clone();
                     let range = (!refs.is_empty()).then(|| {
                         let min = refs.iter().map(|r| r.ep).min().unwrap_or_default();
@@ -722,6 +727,28 @@ fn LvEditor(id: String) -> impl IntoView {
                                         </table>
                                     }.into_any()
                                 }}
+                                {(!ek.is_empty()).then(|| view! {
+                                    <div class="hist-head"><strong>"Einkaufspreise (Lieferanten)"</strong></div>
+                                    <table class="hist-table">
+                                        <thead><tr>
+                                            <th class="num">"EP netto €"</th><th class="num">"Menge"</th><th>"Artikel"</th>
+                                            <th>"Lieferant"</th><th>"Datum"</th>
+                                            <th class="num" title="Ähnlichkeit zum Kurztext">"Ähnl."</th>
+                                        </tr></thead>
+                                        <tbody>
+                                            {ek.into_iter().map(|r| view! {
+                                                <tr>
+                                                    <td class="num"><strong>{money(r.ep)}</strong>{format!(" / {}", r.einheit.clone().unwrap_or_default())}</td>
+                                                    <td class="num">{r.menge.map(|m| fmt_de(m, 0)).unwrap_or_default()}</td>
+                                                    <td title=r.path.clone()>{r.bezeichnung.clone()}<div class="muted small path">{r.path.clone()}</div></td>
+                                                    <td>{r.lieferant.clone()}</td>
+                                                    <td>{r.date.format("%m/%Y").to_string()}</td>
+                                                    <td class="num">{format!("{} %", (r.similarity * 100.0).round())}</td>
+                                                </tr>
+                                            }).collect_view()}
+                                        </tbody>
+                                    </table>
+                                })}
                             </td>
                         </tr>
                     }
