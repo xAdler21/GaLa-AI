@@ -1,5 +1,5 @@
-//! Dokumenten-Chatbot: Das Sprachmodell sucht selbst (Werkzeuge `suchen`, `seite_lesen`,
-//! `ordner_auflisten`) und antwortet nur aus den gefundenen, nummerierten Quellen.
+//! Dokumenten-Chatbot: Das Sprachmodell sucht selbst (Werkzeuge `suchen`, `preise_suchen`,
+//! `seite_lesen`, `ordner_auflisten`) und antwortet nur aus den gefundenen, nummerierten Quellen.
 //!
 //! Ablauf je Frage ([`ChatService::answer`]):
 //! 1. Die erste Runde erzwingt ein Werkzeug: Das Modell formuliert die Suchanfrage selbst
@@ -21,8 +21,9 @@ use std::time::{Duration, Instant};
 
 use api_types::client::{ChatResponse, ChatSource, ChatStreamEvent, ChatTurn};
 use llm::{ChatMessage, ChatOptions, LlmClient, ToolCall, Turn};
-use retrieval::{Embedder, FolderEntry, Hit, PgVectorStore};
+use retrieval::{Embedder, FolderEntry, Hit, PgVectorStore, PriceRef};
 use serde_json::{Value, json};
+use uuid::Uuid;
 
 /// Antwort, wenn die Suche nichts Passendes liefert.
 pub const NOT_FOUND: &str = "Dazu habe ich in den Dokumenten nichts gefunden.";
@@ -49,6 +50,10 @@ const PAGE_CHARS: usize = 6000;
 const RERANK_DOC_CHARS: usize = 1200;
 /// Höchstens so viele Einträge liefert `ordner_auflisten`.
 const FOLDER_LIMIT: i64 = 80;
+/// Höchstens so viele Einträge liefert `preise_suchen`.
+const PRICE_HITS: i64 = 8;
+/// Oberes Wort der Quellen-ID von Preis-Einträgen (getrennt von den Chunk-IDs).
+const PRICE_ID_TAG: u128 = 0x5052_4943_4552_4546;
 /// Mehr Werkzeugaufrufe je Runde werden nicht ausgeführt (Kontext).
 const MAX_CALLS_PER_ROUND: usize = 3;
 /// Wie viele frühere Runden mitgegeben werden.
@@ -84,6 +89,9 @@ pub trait Search: Send + Sync {
         &self,
         path: &str,
     ) -> impl Future<Output = Result<Vec<FolderEntry>, ChatError>> + Send;
+
+    /// Eigene Einheitspreise aus der Preis-Historie.
+    fn prices(&self, query: &str) -> impl Future<Output = Result<Vec<PriceRef>, ChatError>> + Send;
 }
 
 /// Bewertet Kandidaten neu. `None`: kein Reranker (die Reihenfolge der Suche bleibt).
@@ -123,6 +131,10 @@ impl Search for PgVectorStore {
 
     async fn folder(&self, path: &str) -> Result<Vec<FolderEntry>, ChatError> {
         Ok(self.list_folder(path, FOLDER_LIMIT).await?)
+    }
+
+    async fn prices(&self, query: &str) -> Result<Vec<PriceRef>, ChatError> {
+        Ok(self.price_history(query, PRICE_HITS).await?)
     }
 }
 
@@ -387,6 +399,19 @@ impl<E: Embedder, S: Search, R: Rerank, L: Llm> ChatService<E, S, R, L> {
                 let entries = self.search.folder(&path).await?;
                 Ok(format_folder(&path, &entries))
             }
+            "preise_suchen" => {
+                let query = text("leistung");
+                if query.is_empty() {
+                    return Ok("Fehler: Die Leistung (`leistung`) fehlt.".into());
+                }
+                status(sink, format!("Preis-Historie: {query}"));
+                let prices = self.search.prices(&query).await?;
+                if prices.is_empty() {
+                    return Ok("Keine eigenen Preise zu diesem Text. Versuche ein kürzeres Stichwort oder `suchen`.".into());
+                }
+                let hits = prices.iter().map(price_hit).collect();
+                Ok(format_hits(hits, sources, TOOL_CHARS_PER_HIT, true))
+            }
             other => Ok(format!("Unbekanntes Werkzeug: {other}")),
         }
     }
@@ -544,11 +569,91 @@ pub fn cited_numbers(text: &str) -> BTreeSet<u32> {
     out
 }
 
+/// Pfad und Seite; Belege aus Lieferantenordnern mit Vermerk (Einkauf, nicht eigenes Angebot).
 fn place(hit: &Hit) -> String {
-    match hit.page {
+    let place = match hit.page {
         Some(p) => format!("{}, Seite {p}", hit.rel_path),
         None => hit.rel_path.clone(),
+    };
+    if hit.rel_path.to_lowercase().contains("lieferant") {
+        format!("{place} (Lieferantenbeleg: Einkaufspreise)")
+    } else {
+        place
     }
+}
+
+/// Eintrag der Preis-Historie als Quelle.
+fn price_hit(p: &PriceRef) -> Hit {
+    let doc = match p.phase {
+        86 => "Auftrag",
+        85 => "Nebenangebot",
+        _ => "Angebot",
+    };
+    let unit = p.einheit.as_deref().unwrap_or("").trim();
+    let mut text = format!(
+        "Eigener Preis ({doc} „{}“ vom {}), OZ {}: {}\nEP {} €",
+        p.lv_name.trim(),
+        p.datum,
+        p.oz.trim(),
+        p.kurztext.trim(),
+        de_num(&p.ep)
+    );
+    if !unit.is_empty() {
+        text.push_str(&format!(" je {unit}"));
+    }
+    if let Some(m) = &p.menge {
+        text.push_str(&format!(", Menge {} {unit}", de_num(m)));
+    }
+    Hit {
+        chunk_id: Uuid::from_u128(PRICE_ID_TAG << 64 | u128::from(p.id.unsigned_abs())),
+        rel_path: p.rel_path.clone(),
+        page: None,
+        text: text.trim_end().to_owned(),
+        score: p.similarity,
+    }
+}
+
+/// Postgres-`numeric` als Text („301.020“) im deutschen Format („301,02“).
+fn de_num(n: &str) -> String {
+    let n = if n.contains('.') {
+        n.trim_end_matches('0').trim_end_matches('.')
+    } else {
+        n
+    };
+    n.replace('.', ",")
+}
+
+/// „30,000“ (drei Nachkommastellen, Mengen im AVA-Druck) liest das Modell leicht als 30 000.
+/// Endnullen solcher Zahlen fallen deshalb weg: 30,000 → 30, 12,500 → 12,5.
+fn trim_decimals(text: &str) -> String {
+    let c: Vec<char> = text.chars().collect();
+    let digit = |i: usize| c.get(i).is_some_and(char::is_ascii_digit);
+    let mut out = String::with_capacity(text.len());
+    let mut i = 0;
+    while i < c.len() {
+        let three_decimals = c[i] == ','
+            && i > 0
+            && digit(i - 1)
+            && digit(i + 1)
+            && digit(i + 2)
+            && digit(i + 3)
+            && !digit(i + 4)
+            // „1,000,00“ (OCR für 1.000,00) nicht anfassen
+            && !(c.get(i + 4) == Some(&',') && digit(i + 5));
+        if three_decimals {
+            let frac: String = c[i + 1..i + 4].iter().collect();
+            let frac = frac.trim_end_matches('0');
+            if !frac.is_empty() {
+                out.push(',');
+                out.push_str(frac);
+            }
+            i += 4;
+        } else {
+            out.push(c[i]);
+            i += 1;
+        }
+    }
+    out
 }
 
 /// Ergebnis eines Werkzeugs: nummerierte Fundstellen; schon bekannte nur als Verweis.
@@ -599,6 +704,13 @@ fn tools() -> Value {
             }, "required": ["anfrage"]}
         }},
         {"type": "function", "function": {
+            "name": "preise_suchen",
+            "description": "Durchsucht die Preis-Historie: eigene Einheitspreise aus unseren Angeboten und Aufträgen. Liefert nummerierte Einträge mit Kurztext, EP, Einheit, Datum und Dokument, ähnlichste zuerst, bei Gleichstand die neuesten.",
+            "parameters": {"type": "object", "properties": {
+                "leistung": {"type": "string", "description": "Leistung oder Material wie im LV-Kurztext, z. B. Mauerscheiben 100/80 Sichtbeton; ohne Kunde, Jahr oder das Wort Preis."}
+            }, "required": ["leistung"]}
+        }},
+        {"type": "function", "function": {
             "name": "seite_lesen",
             "description": "Liest den ganzen Text einer Seite, z. B. wenn ein Auszug abgeschnitten ist.",
             "parameters": {"type": "object", "properties": {
@@ -624,7 +736,8 @@ So arbeitest du:
 - Passt nichts, suche noch einmal mit anderen Wörtern oder Fachbegriffen (z. B. Pflaster, Betonsteinpflaster, Verbundpflaster) oder sieh mit `ordner_auflisten` im passenden Jahresordner nach. Antworte erst nach mindestens zwei Suchen, dass du nichts gefunden hast.
 - Ist ein Auszug abgeschnitten, lies die Seite mit `seite_lesen`.
 - Nach höchstens drei Runden mit Werkzeugen antwortest du.
-- Belege von Lieferanten (z. B. im Ordner Lieferantendokumentation, Angebote und Auftragsbestätigungen von Baustoffhändlern oder Baumschulen) zeigen Einkaufspreise. Eigene Angebote, Leistungsverzeichnisse und Rechnungen an Kunden zeigen Verkaufspreise. Sage in der Antwort, was was ist.
+- Fragt der Nutzer, was wir angeboten, verlangt oder abgerechnet haben oder was eine Leistung bei uns kostet, nutze `preise_suchen` mit der Leistung oder dem Material (z. B. „Mauerscheiben 100/80 Sichtbeton“, ohne Kunde, Jahr oder das Wort Preis). Geht es um ein bestimmtes Projekt, nimm `suchen` mit Kunde und Ort.
+- Quellen mit dem Vermerk „Lieferantenbeleg: Einkaufspreise“ zeigen, was wir beim Lieferanten bezahlt haben, nicht was wir angeboten haben. Ist nach eigenen Preisen gefragt, nenne sie höchstens zusätzlich und ausdrücklich als Einkaufspreis. Eigene Angebote, Leistungsverzeichnisse, Rechnungen an Kunden und die Preis-Historie zeigen Verkaufspreise.
 
 Zahlen in den Quellen stehen im deutschen Format: Komma als Dezimaltrennzeichen, Punkt für Tausender (30,000 = 30; 1.075,00 = 1075).
 
@@ -713,7 +826,7 @@ fn clean(text: &str) -> String {
         }
     }
     flush(&mut out, &mut leader);
-    out.trim_end().to_owned()
+    trim_decimals(out.trim_end())
 }
 
 fn to_source(nr: usize, hit: &Hit) -> ChatSource {
@@ -781,6 +894,25 @@ mod tests {
                         docs: 1,
                     },
                 ]
+            } else {
+                Vec::new()
+            })
+        }
+        async fn prices(&self, query: &str) -> Result<Vec<PriceRef>, ChatError> {
+            Ok(if query.contains("Mauerscheiben") {
+                vec![PriceRef {
+                    id: 7,
+                    rel_path: "2026/ARTMANN/LV.d84".into(),
+                    lv_name: "Riekofen".into(),
+                    phase: 84,
+                    oz: "01.02".into(),
+                    kurztext: "Mauerscheiben L/H 100/80cm".into(),
+                    menge: Some("12.000".into()),
+                    einheit: Some("St".into()),
+                    ep: "301.020".into(),
+                    datum: "16.10.2026".into(),
+                    similarity: 0.79,
+                }]
             } else {
                 Vec::new()
             })
@@ -979,6 +1111,51 @@ mod tests {
         );
         assert!(tool.content.contains("[2] Preise.xlsx\nKies 12 EUR"));
         assert!(tool.content.chars().count() < 1500 + 400, "Treffer gekürzt");
+    }
+
+    #[tokio::test]
+    async fn price_tool_lists_own_prices_in_german_format() {
+        let svc = service(
+            vec![],
+            NoRerank,
+            vec![
+                tools_step(&[("preise_suchen", r#"{"leistung":"Mauerscheiben 100/80"}"#)]),
+                text("Zuletzt 301,02 € je St [1]."),
+            ],
+        );
+        let (resp, events) = ask(&svc, "Mauerscheiben?", &[]).await;
+        let resp = resp.unwrap();
+        assert_eq!(resp.sources[0].path, "2026/ARTMANN/LV.d84");
+        assert!(events.contains(&ChatStreamEvent::Status {
+            text: "Preis-Historie: Mauerscheiben 100/80".into()
+        }));
+        let calls = svc.llm.calls.lock().unwrap();
+        let tool = &calls[1].0.last().unwrap().content;
+        assert_eq!(
+            tool,
+            "[1] 2026/ARTMANN/LV.d84\nEigener Preis (Angebot „Riekofen“ vom 16.10.2026), OZ 01.02: Mauerscheiben L/H 100/80cm\nEP 301,02 € je St, Menge 12 St"
+        );
+    }
+
+    #[test]
+    fn three_decimals_lose_trailing_zeros() {
+        assert_eq!(
+            trim_decimals("30,000 m² zu 12,500 € und 1.075,00"),
+            "30 m² zu 12,5 € und 1.075,00"
+        );
+        let untouched = "12,345 St, 1,000,00 €, 1,0000, a,000";
+        assert_eq!(trim_decimals(untouched), untouched);
+        assert_eq!(clean("Menge 30,000 m2"), "Menge 30 m2");
+    }
+
+    #[test]
+    fn supplier_documents_are_marked() {
+        let h = hit("2024/X/04_Lieferantendokumentation/Gerner.pdf", Some(1), "");
+        assert!(place(&h).ends_with(", Seite 1 (Lieferantenbeleg: Einkaufspreise)"));
+        assert_eq!(
+            place(&hit("2024/X/Angebot.pdf", None, "")),
+            "2024/X/Angebot.pdf"
+        );
     }
 
     #[tokio::test]

@@ -125,7 +125,7 @@ Jede VM hat den Linux-Nutzer `claude` mit sudo (NOPASSWD). Den Schlüssel liefer
 - `worker/cuda`, `bench/cuda`: OCR auf einer GPU. Im Betrieb ungenutzt und nicht in der CI (das Build-Skript von ort-sys rc.13 bricht damit unter Linux ab).
 
 ### Dokumenten-Chatbot (`crates/chat`)
-- Das LLM sucht selbst über Werkzeuge (OpenAI-Tool-Calls an llama-server): `suchen` (Hybrid-Suche, danach Reranker, die besten 6), `seite_lesen` (Pfad, Seite), `ordner_auflisten` (Pfad).
+- Das LLM sucht selbst über Werkzeuge (OpenAI-Tool-Calls an llama-server): `suchen` (Hybrid-Suche, danach Reranker, die besten 6), `preise_suchen` (eigene EPs aus `price_ref`, Wortähnlichkeit des Kurztexts ab 0,6, höchstens 8), `seite_lesen` (Pfad, Seite), `ordner_auflisten` (Pfad). Treffer aus Pfaden mit „Lieferant“ tragen den Vermerk „Lieferantenbeleg: Einkaufspreise“.
 - Runde 1 erzwingt ein Werkzeug (`tool_choice: required`), höchstens 4 Runden, die letzte ohne Werkzeuge. Quellennummern gelten für die ganze Frage; die Antwort liefert nur die zitierten Quellen (`ChatSource.nr`).
 - Rückfall auf den einfachen Weg (eine Suche mit der Frage, Top 8): wenn das Modell in Runde 1 kein Werkzeug nutzt oder der Kontext überläuft.
 - Reranker nicht erreichbar: Reihenfolge der Hybrid-Suche, 5 Minuten lang kein neuer Versuch.

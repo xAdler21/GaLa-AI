@@ -163,6 +163,25 @@ pub struct FolderEntry {
     pub docs: i64,
 }
 
+/// Eigener Einheitspreis aus der Preis-Historie (Tabelle `price_ref`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct PriceRef {
+    pub id: i64,
+    pub rel_path: String,
+    pub lv_name: String,
+    /// GAEB-Phase: 84 Angebot, 85 Nebenangebot, 86 Auftrag.
+    pub phase: i16,
+    pub oz: String,
+    pub kurztext: String,
+    /// Postgres-`numeric` als Text, z. B. „12.000“.
+    pub menge: Option<String>,
+    pub einheit: Option<String>,
+    pub ep: String,
+    /// Dateidatum als TT.MM.JJJJ.
+    pub datum: String,
+    pub similarity: f32,
+}
+
 /// Reciprocal Rank Fusion: `score(d) = Σ 1 / (k + rang_i(d))` über alle Listen (Rang ab 1).
 /// Ergebnis nach Score absteigend; bei Gleichstand gewinnt, wer zuerst in einer Liste auftaucht.
 pub fn rrf_fuse<K: Hash + Eq + Clone>(lists: &[Vec<K>], k: f32) -> Vec<(K, f32)> {
@@ -216,6 +235,49 @@ fn to_row(r: &sqlx::postgres::PgRow) -> Result<Row4, sqlx::Error> {
 impl PgVectorStore {
     pub fn new(pool: PgPool) -> Self {
         Self { pool }
+    }
+
+    /// Eigene Preise, deren Kurztext `query` enthält (Trigramm-Wortähnlichkeit, Schwelle von
+    /// pg_trgm: 0,6). Gleicher Kurztext zum gleichen Preis zählt einmal, mit dem neuesten Dokument.
+    pub async fn price_history(
+        &self,
+        query: &str,
+        limit: i64,
+    ) -> Result<Vec<PriceRef>, RetrievalError> {
+        let rows = sqlx::query(
+            "SELECT * FROM ( \
+                 SELECT DISTINCT ON (p.kurztext, p.ep, p.einheit) \
+                        p.id, d.rel_path, p.lv_name, p.phase, p.oz, p.kurztext, p.menge::text AS menge, \
+                        p.einheit, p.ep::text AS ep, to_char(d.mtime, 'DD.MM.YYYY') AS datum, d.mtime, \
+                        word_similarity($1, p.kurztext)::float4 AS sim \
+                 FROM price_ref p JOIN document d ON d.id = p.document_id \
+                 WHERE $1 <% p.kurztext \
+                 ORDER BY p.kurztext, p.ep, p.einheit, d.mtime DESC \
+             ) u ORDER BY sim DESC, mtime DESC LIMIT $2",
+        )
+        .bind(query)
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await?;
+        let prices = rows
+            .iter()
+            .map(|r| {
+                Ok(PriceRef {
+                    id: r.try_get("id")?,
+                    rel_path: r.try_get("rel_path")?,
+                    lv_name: r.try_get("lv_name")?,
+                    phase: r.try_get("phase")?,
+                    oz: r.try_get("oz")?,
+                    kurztext: r.try_get("kurztext")?,
+                    menge: r.try_get("menge")?,
+                    einheit: r.try_get("einheit")?,
+                    ep: r.try_get("ep")?,
+                    datum: r.try_get("datum")?,
+                    similarity: r.try_get("sim")?,
+                })
+            })
+            .collect::<Result<Vec<_>, sqlx::Error>>()?;
+        Ok(prices)
     }
 
     /// Chunks eines Dokuments, die noch kein Embedding haben (höchstens `limit`).

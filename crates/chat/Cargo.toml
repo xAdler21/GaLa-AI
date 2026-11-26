@@ -15,10 +15,10 @@ retrieval.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
+uuid.workspace = true
 
 [dev-dependencies]
 tokio = { version = "1.54.1", features = ["rt", "macros"] }
-uuid.workspace = true
 
 [lints]
 workspace = true
