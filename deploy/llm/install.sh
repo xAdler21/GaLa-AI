@@ -57,10 +57,11 @@ if [ ! -f "$GALA_ETC/llm.env" ]; then
 fi
 write_hosts_block
 
-log "Firewall: 8080 nur von gala-coordinator und gala-ocr"
+log "Firewall: 8080 nur von gala-coordinator und gala-ocr, 8082 (Reranker) nur von gala-coordinator"
 ufw_base
 ufw_allow_from "$GALA_COORDINATOR_IP" 8080 'llama-server (coordinator)'
 ufw_allow_from "$GALA_OCR_IP" 8080 'llama-server (ocr)'
+ufw_allow_from "$GALA_COORDINATOR_IP" 8082 'reranker (coordinator)'
 ufw_enable
 # Docker umgeht ufw für veröffentlichte Ports: DOCKER-USER-Regel zusätzlich nötig
 install_docker_firewall llm

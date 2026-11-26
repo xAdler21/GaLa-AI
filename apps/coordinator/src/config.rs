@@ -22,6 +22,10 @@ pub struct Config {
     /// llama-server für den Dokumenten-Chatbot (`GALA_LLM_URL`).
     #[cfg_attr(not(feature = "embed"), allow(dead_code))]
     pub llm_url: String,
+    /// llama-server mit Reranker (`GALA_RERANK_URL`, Standard `http://gala-llm:8082`;
+    /// `off` schaltet ab, dann bleibt die Reihenfolge der Hybrid-Suche).
+    #[cfg_attr(not(feature = "embed"), allow(dead_code))]
+    pub rerank_url: Option<String>,
     /// Ablage des Embedding-Modells (`GALA_EMBED_CACHE_DIR`, nur mit Feature `embed`).
     #[cfg_attr(not(feature = "embed"), allow(dead_code))]
     pub embed_cache_dir: Option<PathBuf>,
@@ -62,6 +66,14 @@ impl Config {
                 .unwrap_or_else(|| "http://gala-llm:8080".into())
                 .trim_end_matches('/')
                 .to_string(),
+            rerank_url: match nonempty("GALA_RERANK_URL") {
+                Some(v) if v.eq_ignore_ascii_case("off") => None,
+                v => Some(
+                    v.unwrap_or_else(|| "http://gala-llm:8082".into())
+                        .trim_end_matches('/')
+                        .to_string(),
+                ),
+            },
             embed_cache_dir: nonempty("GALA_EMBED_CACHE_DIR").map(PathBuf::from),
             cookie_secure: match nonempty("GALA_COOKIE_SECURE") {
                 None => true,
@@ -99,6 +111,7 @@ impl Config {
             internal_token: Some("geheim".into()),
             cookie_secure: false,
             llm_url: "http://gala-llm:8080".into(),
+            rerank_url: None,
             embed_cache_dir: None,
         }
     }
@@ -126,6 +139,9 @@ mod tests {
         assert!(c.cookie_secure);
         assert!(c.internal_token.is_none());
         assert_eq!(c.llm_url, "http://gala-llm:8080");
+        assert_eq!(c.rerank_url.as_deref(), Some("http://gala-llm:8082"));
+        let off = Config::from_lookup(|k| (k == "GALA_RERANK_URL").then(|| "OFF".into())).unwrap();
+        assert_eq!(off.rerank_url, None);
     }
 
     #[test]

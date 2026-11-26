@@ -19,7 +19,7 @@ Fachliche Architektur, Preis-Engine und Meilensteine stehen in [docs/ARCHITEKTUR
 |---|---|---|
 | `gala-coordinator` | keine | Postgres 17 + pgvector, `coordinator` (axum), Caddy (TLS), `worker --role cpu`, Datei-Store `/srv/gala/data` (per NFS an gala-ocr) |
 | `gala-ocr` | keine | `worker --role vision`: OCR (oar-ocr) und Embeddings (BGE-M3), beides auf der CPU |
-| `gala-llm` | RTX 3070 + GTX 1070 (16 GB, Layer-Split, Treiber 580) | `llama-server` (OpenAI-kompatibel) auf `:8080` |
+| `gala-llm` | RTX 3070 + GTX 1070 (16 GB, Layer-Split, Treiber 580) | `llama-server` (OpenAI-kompatibel) auf `:8080`, Reranker (zweiter llama-server) auf `:8082` |
 
 Das Netzlaufwerk (NAS) ist auf gala-coordinator und gala-ocr read-only unter `/mnt/archiv` eingebunden.
 
@@ -34,6 +34,7 @@ Die Prozesse kommunizieren **nur über Postgres, den Datei-Store und HTTP zu lla
 | Coordinator, intern (`/internal/*`) | `0.0.0.0:8081` | Firewall: nur die drei VMs |
 | Postgres | `gala-coordinator:5432` | Firewall: nur gala-ocr |
 | llama-server | `gala-llm:8080` | Firewall: nur gala-coordinator und gala-ocr |
+| Reranker (llama-server `--reranking`) | `gala-llm:8082` | Firewall: nur gala-coordinator |
 
 ## Verträge
 
@@ -44,7 +45,7 @@ Die DTOs stehen in `crates/api-types/src/client.rs` und sind die einzige Quelle 
   - `GET /health`
   - `POST /auth/login`, `POST /auth/logout`
   - `GET /me`
-  - `POST /chat`
+  - `POST /chat`, `POST /chat/stream` (gleiche Anfrage; Antwort als NDJSON, je Zeile ein `ChatStreamEvent`: `status`, `delta`, `reset`, zuletzt `done` oder `error`. Die App fällt bei 404 auf `/chat` zurück)
   - `GET /lvs`, `POST /lvs` (Import, Datei als Base64), `GET /lvs/{id}`, `DELETE /lvs/{id}`
   - `PUT /lvs/{id}/prices` (EP setzen, mit `revision`; veraltet → 409 `conflict`)
   - `GET /lvs/{id}/export/{x84|d84|xlsx}` (JSON mit Base64; X84 nur aus X8x, D84 nur aus D8x)
@@ -110,6 +111,7 @@ Jede VM hat den Linux-Nutzer `claude` mit sudo (NOPASSWD). Den Schlüssel liefer
 | `GALA_INTERNAL_TOKEN` | coordinator, update.sh | Schutz für schreibende `/internal`-Routen |
 | `GALA_ARCHIV_ROOT` | worker | Wurzel des Netzlaufwerks, Standard `/mnt/archiv` |
 | `GALA_LLM_URL` | coordinator, worker | Standard `http://gala-llm:8080` |
+| `GALA_RERANK_URL` | coordinator | Reranker, Standard `http://gala-llm:8082`; `off` schaltet ab |
 | `GALA_EK_SCAN` | coordinator | `0` schaltet das Auslesen der Einkaufspreise ab (Standard an) |
 | `GALA_EMBED_CACHE_DIR` | coordinator (Feature `embed`), worker (vision) | Modell-Cache für BGE-M3 |
 | `PDFIUM_DIR` | worker | Ordner mit libpdfium, falls nicht systemweit installiert |
@@ -121,6 +123,12 @@ Jede VM hat den Linux-Nutzer `claude` mit sudo (NOPASSWD). Den Schlüssel liefer
 - `coordinator/embed`: Dokumenten-Chatbot (Frage-Embeddings per fastembed). Ohne das Feature antwortet `POST /api/v1/chat` mit 501. Im Docker-Image ist es standardmäßig an (`GALA_COORDINATOR_FEATURES`).
 - `worker/vision`: OCR und Embeddings (CPU) für die Rolle `vision`. Ohne das Feature beendet sich `--role vision` mit einer Meldung.
 - `worker/cuda`, `bench/cuda`: OCR auf einer GPU. Im Betrieb ungenutzt und nicht in der CI (das Build-Skript von ort-sys rc.13 bricht damit unter Linux ab).
+
+### Dokumenten-Chatbot (`crates/chat`)
+- Das LLM sucht selbst über Werkzeuge (OpenAI-Tool-Calls an llama-server): `suchen` (Hybrid-Suche, danach Reranker, die besten 6), `seite_lesen` (Pfad, Seite), `ordner_auflisten` (Pfad).
+- Runde 1 erzwingt ein Werkzeug (`tool_choice: required`), höchstens 4 Runden, die letzte ohne Werkzeuge. Quellennummern gelten für die ganze Frage; die Antwort liefert nur die zitierten Quellen (`ChatSource.nr`).
+- Rückfall auf den einfachen Weg (eine Suche mit der Frage, Top 8): wenn das Modell in Runde 1 kein Werkzeug nutzt oder der Kontext überläuft.
+- Reranker nicht erreichbar: Reihenfolge der Hybrid-Suche, 5 Minuten lang kein neuer Versuch.
 
 ### Chat-Fehlercodes
 - `not_implemented` (501): Chatbot auf dem Server nicht aktiviert.
@@ -139,6 +147,7 @@ Jede VM hat den Linux-Nutzer `claude` mit sudo (NOPASSWD). Den Schlüssel liefer
 ### Einkaufspreise (Tabellen `ek_price`, `ek_scan`)
 - Quelle: PDFs im Lieferantenordner (Angebot, Auftragsbestätigung, Preisliste; keine Lieferscheine).
 - Der Coordinator liest sie im Hintergrund mit dem LLM (ein Beleg nach dem anderen, neueste zuerst, Text auf 12 000 Zeichen gekürzt). Positionen, deren Gesamtpreis nicht zu Menge × EP passt, fallen weg. `ek_scan` merkt sich die gelesene Fassung (sha256); ändert sich die Datei, wird sie neu gelesen.
+- Solange ein Chat läuft und bis 60 s danach pausiert das Auslesen; ein laufender Beleg wird abgebrochen und später neu gelesen.
 - Abschalten: `GALA_EK_SCAN=0` am Coordinator.
 - Vorschläge: `PriceSuggestion.ek`, Trigramm-Ähnlichkeit der Artikelbezeichnung zum Kurztext, Einheit nicht gefiltert (gleiche Einheit zuerst), je Position höchstens 5.
 

@@ -3,7 +3,8 @@
 //! - [`Embedder`]: Text → Vektor. [`FastEmbedder`] (Feature `fastembed`) nutzt BGE-M3 (1024 Dim.),
 //!   [`HashEmbedder`] ist deterministisch und nur für Tests gedacht.
 //! - [`PgVectorStore`]: Embeddings speichern und suchen. Die Hybrid-Suche fusioniert dichte
-//!   Kosinus-Suche und deutsche Volltextsuche per Reciprocal Rank Fusion ([`rrf_fuse`]).
+//!   Kosinus-Suche, deutsche Volltextsuche und eine Suche über den Dateipfad (Kunde, Ort, Projekt
+//!   stehen oft nur dort) per Reciprocal Rank Fusion ([`rrf_fuse`]).
 
 use std::collections::HashMap;
 use std::hash::Hash;
@@ -152,6 +153,16 @@ pub struct Hit {
     pub score: f32,
 }
 
+/// Eintrag beim Auflisten eines Archiv-Ordners.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FolderEntry {
+    pub name: String,
+    /// `false`: Unterordner.
+    pub is_file: bool,
+    /// Indizierte Dokumente darunter (bei Dateien 1).
+    pub docs: i64,
+}
+
 /// Reciprocal Rank Fusion: `score(d) = Σ 1 / (k + rang_i(d))` über alle Listen (Rang ab 1).
 /// Ergebnis nach Score absteigend; bei Gleichstand gewinnt, wer zuerst in einer Liste auftaucht.
 pub fn rrf_fuse<K: Hash + Eq + Clone>(lists: &[Vec<K>], k: f32) -> Vec<(K, f32)> {
@@ -254,8 +265,11 @@ impl PgVectorStore {
         Ok(n)
     }
 
-    /// Hybrid-Suche: dichte Kosinus-Suche (`query_emb`) und Volltext (`query_text`, deutsch,
-    /// `websearch_to_tsquery`), je Top-`top_n`, per RRF fusioniert, gekürzt auf `limit`.
+    /// Hybrid-Suche, je Top-`top_n`, per RRF fusioniert, gekürzt auf `limit`:
+    /// - dichte Kosinus-Suche (`query_emb`),
+    /// - Volltext (`query_text`, deutsch, Wörter mit ODER verknüpft),
+    /// - Pfad: die 20 Dokumente, deren Pfad die meisten Wörter der Anfrage enthält, darin die
+    ///   Chunks nach Kosinus-Nähe.
     pub async fn hybrid_search(
         &self,
         query_text: &str,
@@ -269,13 +283,14 @@ impl PgVectorStore {
                 got: query_emb.len(),
             });
         }
+        let emb = Vector::from(query_emb);
         let dense = sqlx::query(
             "SELECT c.id, d.rel_path, c.page, c.text \
              FROM chunk c JOIN document d ON d.id = c.document_id \
              WHERE c.emb IS NOT NULL \
              ORDER BY c.emb <=> $1 LIMIT $2",
         )
-        .bind(Vector::from(query_emb))
+        .bind(emb.clone())
         .bind(top_n)
         .fetch_all(&self.pool)
         .await?;
@@ -290,10 +305,29 @@ impl PgVectorStore {
         .bind(top_n)
         .fetch_all(&self.pool)
         .await?;
+        // shortcut: to_tsvector über alle Pfade je Anfrage (~35k Dokumente, unter 0,2 s);
+        // bei deutlich mehr Dokumenten eine generierte Spalte mit GIN-Index anlegen.
+        let by_path = sqlx::query(
+            "WITH q AS (SELECT replace(websearch_to_tsquery('simple', $1)::text, ' & ', ' | ')::tsquery AS q), \
+             docs AS ( \
+                 SELECT d.id, d.rel_path, ts_rank(v, q.q) AS r \
+                 FROM document d, q, \
+                      to_tsvector('simple', translate(d.rel_path, '/_-.,[]()', '         ')) AS v \
+                 WHERE v @@ q.q ORDER BY r DESC LIMIT 20) \
+             SELECT c.id, docs.rel_path, c.page, c.text \
+             FROM chunk c JOIN docs ON docs.id = c.document_id \
+             WHERE c.emb IS NOT NULL \
+             ORDER BY c.emb <=> $2 LIMIT $3",
+        )
+        .bind(query_text)
+        .bind(emb)
+        .bind(top_n)
+        .fetch_all(&self.pool)
+        .await?;
 
         let mut by_id: HashMap<Uuid, Row4> = HashMap::new();
         let mut lists: Vec<Vec<Uuid>> = Vec::new();
-        for rows in [&dense, &sparse] {
+        for rows in [&dense, &sparse, &by_path] {
             let mut ids = Vec::with_capacity(rows.len());
             for r in rows {
                 let row = to_row(r)?;
@@ -319,6 +353,90 @@ impl PgVectorStore {
                 })
             })
             .collect())
+    }
+}
+
+impl PgVectorStore {
+    /// Text einer Seite (`page`; ohne Seite: Dokumentanfang), Chunks in Reihenfolge,
+    /// höchstens `max_chars` Zeichen. `None`, wenn Pfad oder Seite unbekannt sind.
+    pub async fn page_text(
+        &self,
+        rel_path: &str,
+        page: Option<u32>,
+        max_chars: usize,
+    ) -> Result<Option<Hit>, RetrievalError> {
+        let page = page.and_then(|p| i32::try_from(p).ok());
+        let rows = sqlx::query(
+            "SELECT c.id, d.rel_path, c.page, c.text \
+             FROM chunk c JOIN document d ON d.id = c.document_id \
+             WHERE d.rel_path = $1 AND ($2::int IS NULL OR c.page = $2 OR c.page IS NULL) \
+             ORDER BY c.ord LIMIT 40",
+        )
+        .bind(rel_path)
+        .bind(page)
+        .fetch_all(&self.pool)
+        .await?;
+        let mut first: Option<Row4> = None;
+        let mut text = String::new();
+        for r in &rows {
+            let row = to_row(r)?;
+            if text.chars().count() >= max_chars {
+                break;
+            }
+            if !text.is_empty() {
+                text.push('\n');
+            }
+            text.push_str(&row.text);
+            first.get_or_insert(row);
+        }
+        Ok(first.map(|r| Hit {
+            chunk_id: r.id,
+            rel_path: r.rel_path,
+            page: r.page.and_then(|p| u32::try_from(p).ok()),
+            text: text.chars().take(max_chars).collect(),
+            score: 0.0,
+        }))
+    }
+
+    /// Unterordner und Dateien direkt unter `prefix` (relativ zur Archivwurzel, `""` = oben),
+    /// nach Name sortiert, höchstens `limit`.
+    pub async fn list_folder(
+        &self,
+        prefix: &str,
+        limit: i64,
+    ) -> Result<Vec<FolderEntry>, RetrievalError> {
+        let prefix = folder_prefix(prefix);
+        let rows = sqlx::query(
+            "SELECT split_part(substr(rel_path, length($1) + 1), '/', 1) AS name, \
+                    count(*) AS docs, \
+                    bool_and(strpos(substr(rel_path, length($1) + 1), '/') = 0) AS is_file \
+             FROM document WHERE starts_with(rel_path, $1) \
+             GROUP BY 1 ORDER BY 1 LIMIT $2",
+        )
+        .bind(&prefix)
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await?;
+        rows.iter()
+            .map(|r| {
+                Ok(FolderEntry {
+                    name: r.try_get("name")?,
+                    docs: r.try_get("docs")?,
+                    is_file: r.try_get("is_file")?,
+                })
+            })
+            .collect::<Result<_, sqlx::Error>>()
+            .map_err(Into::into)
+    }
+}
+
+/// `Angebote/2019` → `Angebote/2019/`; leer oder `/` → `""`.
+pub fn folder_prefix(path: &str) -> String {
+    let p = path.trim().trim_matches('/');
+    if p.is_empty() {
+        String::new()
+    } else {
+        format!("{p}/")
     }
 }
 
@@ -362,6 +480,14 @@ mod tests {
         let out = diversify(ranked, |k| Some(k.as_bytes()[0]), 2, 3);
         let keys: Vec<_> = out.iter().map(|(k, _)| *k).collect();
         assert_eq!(keys, ["a1", "a2", "b1"]);
+    }
+
+    #[test]
+    fn folder_prefix_normalizes() {
+        assert_eq!(folder_prefix(""), "");
+        assert_eq!(folder_prefix(" / "), "");
+        assert_eq!(folder_prefix("/Angebote/2019/"), "Angebote/2019/");
+        assert_eq!(folder_prefix("Angebote"), "Angebote/");
     }
 
     #[test]

@@ -8,12 +8,13 @@ mod net;
 mod updates;
 
 use api_types::client::{
-    ChatRequest, ChatResponse, ChatTurn, HealthResponse, LoginRequest, LoginResponse, UserInfo,
+    ChatRequest, ChatResponse, ChatStreamEvent, ChatTurn, HealthResponse, LoginRequest,
+    LoginResponse, UserInfo,
 };
 use net::{CmdResult, err};
 use reqwest::{Client, Method};
 use serde::Serialize;
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Emitter, State};
 
 pub struct AppState {
     pub http: Client,
@@ -122,10 +123,21 @@ async fn me(app: AppHandle, state: State<'_, AppState>) -> CmdResult<UserInfo> {
     net::authed(&app, &state.http, Method::GET, "/me", None::<&()>).await
 }
 
+/// Ereignis `chat-event` an die Oberflaeche: Status oder Antwort-Stueck zur Frage `id`.
+#[derive(Clone, Serialize)]
+struct ChatEventMsg {
+    id: u32,
+    event: ChatStreamEvent,
+}
+
+/// Frage an den Chatbot. Statusmeldungen und Antwort-Stuecke kommen waehrenddessen als
+/// Ereignis `chat-event`, die fertige Antwort als Rueckgabewert. Kennt der Server noch kein
+/// Streaming, geht die Frage an `/chat`.
 #[tauri::command]
-async fn chat(
+async fn chat_stream(
     app: AppHandle,
     state: State<'_, AppState>,
+    id: u32,
     question: String,
     history: Vec<ChatTurn>,
 ) -> CmdResult<ChatResponse> {
@@ -133,7 +145,33 @@ async fn chat(
         return Err(err("invalid_request", "Bitte eine Frage eingeben."));
     }
     let body = ChatRequest { question, history };
-    net::authed(&app, &state.http, Method::POST, "/chat", Some(&body)).await
+    let mut resp = match net::authed_stream(&app, &state.http, "/chat/stream", &body).await {
+        Err(e) if matches!(e.code.as_str(), "not_found" | "http_404" | "http_405") => {
+            return net::authed(&app, &state.http, Method::POST, "/chat", Some(&body)).await;
+        }
+        r => r?,
+    };
+    let mut buf: Vec<u8> = Vec::new();
+    while let Some(chunk) = resp.chunk().await.map_err(net::net_err)? {
+        buf.extend_from_slice(&chunk);
+        while let Some(pos) = buf.iter().position(|&b| b == b'\n') {
+            let line: Vec<u8> = buf.drain(..=pos).collect();
+            let Ok(event) = serde_json::from_slice::<ChatStreamEvent>(&line) else {
+                continue;
+            };
+            match event {
+                ChatStreamEvent::Done { response } => return Ok(response),
+                ChatStreamEvent::Error { error } => return Err(error),
+                event => {
+                    let _ = app.emit("chat-event", ChatEventMsg { id, event });
+                }
+            }
+        }
+    }
+    Err(err(
+        "network",
+        "Die Verbindung zum Server wurde unterbrochen.",
+    ))
 }
 
 fn main() {
@@ -156,7 +194,7 @@ fn main() {
             login,
             logout,
             me,
-            chat,
+            chat_stream,
             lvs::lv_list,
             lvs::lv_import,
             lvs::lv_get,

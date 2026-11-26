@@ -58,6 +58,7 @@ case "$ROLE" in
     ;;
   llm)
     protect 8080 "$GALA_COORDINATOR_IP" "$GALA_OCR_IP"
+    protect 8082 "$GALA_COORDINATOR_IP"
     ;;
   ocr)
     : # gala-ocr veröffentlicht keine Ports

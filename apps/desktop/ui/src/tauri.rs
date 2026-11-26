@@ -2,8 +2,8 @@
 //! Die Namen und Signaturen entsprechen den Commands in `src-tauri/src/main.rs`.
 
 use api_types::client::{
-    ApiError, ChatRequest, ChatResponse, ChatTurn, HealthResponse, LvDetail, LvSummary, PriceEntry,
-    PriceSuggestion, UserInfo,
+    ApiError, ChatResponse, ChatStreamEvent, ChatTurn, HealthResponse, LvDetail, LvSummary,
+    PriceEntry, PriceSuggestion, UserInfo,
 };
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use wasm_bindgen::prelude::*;
@@ -110,17 +110,14 @@ pub async fn me() -> Res<UserInfo> {
     call("me", &NoArgs {}).await
 }
 
-pub async fn chat(question: &str, history: Vec<ChatTurn>) -> Res<ChatResponse> {
-    // `ChatRequest` aus api-types dient nur als Form; der Command nimmt die Felder einzeln.
-    let ChatRequest { question, history } = ChatRequest {
-        question: question.to_owned(),
-        history,
-    };
+/// Frage an den Chatbot; Zwischenstaende kommen ueber [`on_chat_event`] mit derselben `id`.
+pub async fn chat_stream(id: u32, question: &str, history: &[ChatTurn]) -> Res<ChatResponse> {
     call(
-        "chat",
+        "chat_stream",
         &ChatArgs {
-            question: &question,
-            history: &history,
+            id,
+            question,
+            history,
         },
     )
     .await
@@ -128,8 +125,31 @@ pub async fn chat(question: &str, history: Vec<ChatTurn>) -> Res<ChatResponse> {
 
 #[derive(Serialize)]
 struct ChatArgs<'a> {
+    id: u32,
     question: &'a str,
     history: &'a [ChatTurn],
+}
+
+/// Spiegel von `ChatEventMsg` im Rust-Teil.
+#[derive(Deserialize)]
+struct ChatEventMsg {
+    id: u32,
+    event: ChatStreamEvent,
+}
+
+/// Meldet Statusmeldungen und Antwort-Stuecke laufender Chat-Fragen (`id`, Ereignis).
+pub fn on_chat_event(cb: impl Fn(u32, ChatStreamEvent) + 'static) {
+    let closure = Closure::<dyn FnMut(JsValue)>::new(move |ev: JsValue| {
+        let payload =
+            js_sys::Reflect::get(&ev, &JsValue::from_str("payload")).unwrap_or(JsValue::UNDEFINED);
+        if let Ok(m) = serde_wasm_bindgen::from_value::<ChatEventMsg>(payload) {
+            cb(m.id, m.event);
+        }
+    });
+    wasm_bindgen_futures::spawn_local(async move {
+        let _ = listen("chat-event", &closure).await;
+        closure.forget();
+    });
 }
 
 pub async fn check_update() -> Res<Option<UpdateInfo>> {

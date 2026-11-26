@@ -1,6 +1,6 @@
 //! Einkaufspreise: Lieferantenangebote und Auftragsbestätigungen im Archiv werden im Hintergrund
-//! mit dem LLM ausgelesen (ein Beleg nach dem anderen, neueste zuerst). So bleibt der zweite
-//! Platz des llama-server für den Chatbot frei.
+//! mit dem LLM ausgelesen (ein Beleg nach dem anderen, neueste zuerst). Solange Chats laufen,
+//! pausiert das Auslesen; ein laufender Beleg wird dafür abgebrochen und später neu gelesen.
 
 use std::time::Duration;
 
@@ -11,10 +11,14 @@ use serde::Deserialize;
 use serde_json::json;
 use tokio_util::sync::CancellationToken;
 
+use crate::chatbot::ChatActivity;
+
 /// Längere Belege werden gekürzt; die Positionen stehen fast immer vorn.
 const MAX_CHARS: i32 = 12_000;
 /// Ein Beleg mit vielen Positionen braucht bei ~20 Token/s einige Minuten.
 const LLM_TIMEOUT: Duration = Duration::from_secs(600);
+/// So lange nach dem letzten Chat bleibt das Auslesen pausiert (Rückfragen kommen oft gleich).
+const CHAT_QUIET: Duration = Duration::from_secs(60);
 
 const SYSTEM: &str = "Du liest Angebote und Auftragsbestätigungen von Lieferanten (Baustoffe, Pflanzen, \
 Geräte) an einen Garten- und Landschaftsbaubetrieb. Gib jede Artikelposition mit Preis zurück. \
@@ -106,12 +110,19 @@ async fn read_one(llm: &LlmClient, doc: &Candidate) -> Result<Beleg, LlmError> {
     let options = ChatOptions {
         temperature: 0.0,
         max_tokens: Some(4000),
+        // Preislisten wiederholen sich absichtlich; DRY würde gleiche Zeilen unterdrücken.
+        dry_multiplier: None,
     };
     llm.chat_json(&messages, &options, "beleg", &schema()).await
 }
 
-/// Endlosschleife bis `stop`: Beleg holen, auslesen, speichern.
-pub async fn run(pool: db::PgPool, llm_url: String, stop: CancellationToken) {
+/// Endlosschleife bis `stop`: Beleg holen, auslesen, speichern; Pause, solange Chats laufen.
+pub async fn run(
+    pool: db::PgPool,
+    llm_url: String,
+    activity: ChatActivity,
+    stop: CancellationToken,
+) {
     let llm = match LlmClient::new(llm_url, LLM_TIMEOUT) {
         Ok(c) => c,
         Err(e) => {
@@ -121,7 +132,13 @@ pub async fn run(pool: db::PgPool, llm_url: String, stop: CancellationToken) {
     };
     tracing::info!("EK-Preise: Lieferantenbelege werden im Hintergrund gelesen");
     while !stop.is_cancelled() {
-        let pause = match step(&pool, &llm).await {
+        if activity.busy(CHAT_QUIET) {
+            tokio::select! {
+                () = stop.cancelled() => break,
+                () = tokio::time::sleep(Duration::from_secs(5)) => continue,
+            }
+        }
+        let pause = match step(&pool, &llm, &activity).await {
             Ok(true) => Duration::from_secs(1),
             Ok(false) => Duration::from_secs(600),
             Err(e) => {
@@ -138,7 +155,7 @@ pub async fn run(pool: db::PgPool, llm_url: String, stop: CancellationToken) {
 
 /// Ein Beleg. `Ok(false)`: nichts mehr zu tun. `Err`: LLM oder Datenbank nicht erreichbar,
 /// der Beleg bleibt offen.
-async fn step(pool: &db::PgPool, llm: &LlmClient) -> anyhow::Result<bool> {
+async fn step(pool: &db::PgPool, llm: &LlmClient, activity: &ChatActivity) -> anyhow::Result<bool> {
     let Some(doc) = db::ek::next_candidate(pool, MAX_CHARS).await? else {
         return Ok(false);
     };
@@ -147,7 +164,14 @@ async fn step(pool: &db::PgPool, llm: &LlmClient) -> anyhow::Result<bool> {
         return Ok(true);
     }
     let started = std::time::Instant::now();
-    match read_one(llm, &doc).await {
+    let result = tokio::select! {
+        r = read_one(llm, &doc) => r,
+        () = activity.started() => {
+            tracing::info!(beleg = %doc.rel_path, "EK-Preise: Chat hat Vorrang, Beleg später");
+            return Ok(true);
+        }
+    };
+    match result {
         Ok(beleg) => {
             let rows = plausible(beleg.positionen);
             let datum = belegdatum(&beleg.datum);

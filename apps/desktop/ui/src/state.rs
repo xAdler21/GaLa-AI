@@ -35,7 +35,11 @@ pub enum UpdateState {
 
 #[derive(Clone, PartialEq)]
 pub enum ChatState {
-    Pending,
+    /// Laeuft noch: was der Assistent gerade tut und der bisher gestreamte Text.
+    Pending {
+        status: String,
+        text: String,
+    },
     Done(ChatResponse),
     NotImplemented,
     Failed(String),

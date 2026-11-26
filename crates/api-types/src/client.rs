@@ -80,9 +80,28 @@ pub struct ChatResponse {
     pub sources: Vec<ChatSource>,
 }
 
+/// Ereignis von `POST /api/v1/chat/stream` (eine JSON-Zeile je Ereignis, NDJSON).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ChatStreamEvent {
+    /// Was der Assistent gerade tut, z. B. „Suche: Pflaster Kita 2019“.
+    Status { text: String },
+    /// Nächstes Stück des Antworttexts.
+    Delta { text: String },
+    /// Bisher gestreamten Antworttext verwerfen (das Modell sucht doch noch weiter).
+    Reset,
+    /// Fertige Antwort; der Text ist derselbe wie die Summe der Deltas.
+    Done { response: ChatResponse },
+    /// Abbruch mit Fehler (wie die Fehlerantwort von `POST /api/v1/chat`).
+    Error { error: ApiError },
+}
+
 /// Fundstelle, auf die sich die Antwort stützt.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ChatSource {
+    /// Nummer, unter der die Antwort die Quelle zitiert ([1], [2] …). 0 bei älteren Servern.
+    #[serde(default)]
+    pub nr: u32,
     /// Pfad relativ zur Wurzel des Netzlaufwerks, z. B. `Angebote/2019/Kita.pdf`.
     pub path: String,
     /// 1-basiert; `None` bei Dateien ohne Seiten.

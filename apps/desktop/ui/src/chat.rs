@@ -1,6 +1,8 @@
 //! Dokumenten-Chatbot: Frage, Verlauf, Antwort mit Quellen.
 
-use api_types::client::{ChatResponse, ChatTurn};
+use std::sync::atomic::{AtomicBool, Ordering};
+
+use api_types::client::{ChatResponse, ChatStreamEvent, ChatTurn};
 use leptos::html;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
@@ -26,18 +28,52 @@ fn history(ctx: Ctx) -> Vec<ChatTurn> {
         .collect()
 }
 
+fn pending() -> ChatState {
+    ChatState::Pending {
+        status: String::new(),
+        text: String::new(),
+    }
+}
+
+/// Einmal je App: Zwischenstaende der laufenden Fragen in den Verlauf schreiben.
+fn listen_once(ctx: Ctx) {
+    static LISTENING: AtomicBool = AtomicBool::new(false);
+    if LISTENING.swap(true, Ordering::Relaxed) {
+        return;
+    }
+    tauri::on_chat_event(move |id, event| {
+        let Some(entry) = ctx
+            .chat
+            .with_untracked(|c| c.iter().find(|e| e.id as u32 == id).cloned())
+        else {
+            return;
+        };
+        entry.state.update(|s| {
+            if let ChatState::Pending { status, text } = s {
+                match event {
+                    ChatStreamEvent::Status { text: t } => *status = t,
+                    ChatStreamEvent::Delta { text: t } => text.push_str(&t),
+                    ChatStreamEvent::Reset => text.clear(),
+                    ChatStreamEvent::Done { .. } | ChatStreamEvent::Error { .. } => {}
+                }
+            }
+        });
+    });
+}
+
 fn ask(ctx: Ctx, question: String) {
+    listen_once(ctx);
     let hist = history(ctx);
     let entry = ChatEntry {
         id: ctx
             .chat
             .with_untracked(|c| c.last().map_or(0, |e| e.id + 1)),
         question: question.clone(),
-        state: ArcRwSignal::new(ChatState::Pending),
+        state: ArcRwSignal::new(pending()),
     };
     ctx.chat.update(|c| c.push(entry.clone()));
     spawn_local(async move {
-        let state = match tauri::chat(&question, hist).await {
+        let state = match tauri::chat_stream(entry.id as u32, &question, &hist).await {
             Ok(r) => ChatState::Done(r),
             Err(e) => {
                 ctx.handle_error(&e);
@@ -62,7 +98,7 @@ pub fn ChatPage() -> impl IntoView {
         ctx.chat
             .get()
             .iter()
-            .any(|e| e.state.get() == ChatState::Pending)
+            .any(|e| matches!(e.state.get(), ChatState::Pending { .. }))
     };
     let send = move || {
         let q = input.get_untracked().trim().to_owned();
@@ -123,8 +159,14 @@ fn Turn(entry: ChatEntry) -> impl IntoView {
         <div class="turn">
             <div class="bubble q">{entry.question.clone()}</div>
             {move || match entry.state.get() {
-                ChatState::Pending => view! {
-                    <div class="bubble a"><span class="spinner"></span>" Antwort wird gesucht …"</div>
+                ChatState::Pending { status, text } if text.is_empty() => {
+                    let status = if status.is_empty() { "Antwort wird gesucht …".to_owned() } else { status };
+                    view! {
+                        <div class="bubble a"><span class="spinner"></span>" "{status}</div>
+                    }.into_any()
+                }
+                ChatState::Pending { text, .. } => view! {
+                    <div class="bubble a">{text}<span class="spinner"></span></div>
                 }.into_any(),
                 ChatState::Done(r) => view! { <Answer resp=r/> }.into_any(),
                 ChatState::NotImplemented => view! { <div class="msg warn">{MSG_NOT_IMPLEMENTED}</div> }.into_any(),
@@ -144,9 +186,10 @@ fn Answer(resp: ChatResponse) -> impl IntoView {
                 <summary>{format!("Quellen ({n})")}</summary>
                 {resp.sources.into_iter().map(|s| {
                     let place = s.page.map(|p| format!("Seite {p}"));
+                    let nr = (s.nr > 0).then(|| format!("[{}] ", s.nr));
                     view! {
                         <div class="source">
-                            <div class="path">{s.path}{place.map(|p| format!(", {p}"))}</div>
+                            <div class="path">{nr}{s.path}{place.map(|p| format!(", {p}"))}</div>
                             <div class="snip">{s.snippet}</div>
                         </div>
                     }

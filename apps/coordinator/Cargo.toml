@@ -13,6 +13,7 @@ api-types.workspace = true
 chat.workspace = true
 chrono.workspace = true
 clap.workspace = true
+futures-util = { version = "0.3.34", default-features = false }
 db.workspace = true
 export.workspace = true
 gaeb.workspace = true

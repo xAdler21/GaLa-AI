@@ -51,8 +51,13 @@ enum Command {
     /// Desktop-Releases (für Veröffentlichungen per SSH, ohne Anmeldung im Admin-Panel).
     #[command(subcommand)]
     Release(ReleaseCommand),
-    /// Frage an den Dokumenten-Chatbot stellen und Antwort samt Quellen ausgeben (zum Prüfen per SSH).
-    Ask { question: String },
+    /// Fragen an den Dokumenten-Chatbot stellen und Antwort, Schritte, Quellen und Dauer
+    /// ausgeben (zum Prüfen per SSH). `--file`: eine Frage je Zeile.
+    Ask {
+        questions: Vec<String>,
+        #[arg(long)]
+        file: Option<std::path::PathBuf>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -131,27 +136,67 @@ async fn main() -> anyhow::Result<()> {
         }
         Command::Admin(cmd) => admin_command(&database_url, cmd).await,
         Command::Release(cmd) => release_command(&database_url, cmd).await,
-        Command::Ask { question } => ask(&database_url, &question).await,
+        Command::Ask { questions, file } => ask(&database_url, questions, file).await,
     }
 }
 
-async fn ask(database_url: &str, question: &str) -> anyhow::Result<()> {
+async fn ask(
+    database_url: &str,
+    mut questions: Vec<String>,
+    file: Option<std::path::PathBuf>,
+) -> anyhow::Result<()> {
+    use api_types::client::ChatStreamEvent;
+    if let Some(f) = file {
+        let text = std::fs::read_to_string(&f).with_context(|| format!("{} lesen", f.display()))?;
+        questions.extend(
+            text.lines()
+                .map(str::trim)
+                .filter(|l| !l.is_empty() && !l.starts_with('#'))
+                .map(str::to_owned),
+        );
+    }
     let cfg = Config::from_env()?;
     let pool = db::connect(database_url).await?;
     let bot = build_chatbot(&cfg, &pool)
         .await
         .context("Chatbot nicht verfügbar (Feature `embed` oder Modell fehlt)")?;
-    let resp = bot.answer(question, &[]).await?;
-    println!("{}\n", resp.answer);
-    for (i, s) in resp.sources.iter().enumerate() {
-        println!(
-            "[{}] {} S. {:?} ({:.4})\n    {}",
-            i + 1,
-            s.path,
-            s.page,
-            s.score,
-            s.snippet
-        );
+    for question in questions {
+        println!("=== {question}");
+        let started = std::time::Instant::now();
+        let first_text = std::sync::Mutex::new(None);
+        let sink = |e: ChatStreamEvent| match e {
+            ChatStreamEvent::Status { text } => {
+                println!("  … {text} ({:.1} s)", started.elapsed().as_secs_f32());
+            }
+            ChatStreamEvent::Delta { .. } => {
+                first_text
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .get_or_insert(started.elapsed());
+            }
+            _ => {}
+        };
+        match bot.answer(&question, &[], &sink).await {
+            Ok(resp) => {
+                let first = first_text
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .map_or(0.0, |d| d.as_secs_f32());
+                println!(
+                    "  Dauer {:.1} s, erster Text nach {first:.1} s\n\n{}\n",
+                    started.elapsed().as_secs_f32(),
+                    resp.answer
+                );
+                for s in &resp.sources {
+                    println!(
+                        "  [{}] {} S. {:?} ({:.3})\n      {}",
+                        s.nr, s.path, s.page, s.score, s.snippet
+                    );
+                }
+            }
+            Err(e) => println!("  FEHLER: {e:#}"),
+        }
+        println!();
     }
     Ok(())
 }
@@ -347,10 +392,16 @@ async fn build_chatbot(cfg: &Config, pool: &db::PgPool) -> Option<chatbot::Share
             return None;
         }
     };
-    tracing::info!(llm = %cfg.llm_url, "Dokumenten-Chatbot aktiv");
+    let reranker = cfg.rerank_url.as_ref().and_then(|url| {
+        llm::LlmClient::new(url.clone(), chatbot::RERANK_TIMEOUT)
+            .inspect_err(|e| tracing::error!(error = %e, "Reranker-Client nicht erzeugbar"))
+            .ok()
+    });
+    tracing::info!(llm = %cfg.llm_url, rerank = ?cfg.rerank_url, "Dokumenten-Chatbot aktiv");
     Some(Arc::new(chat::ChatService::new(
         embedder,
         retrieval::PgVectorStore::new(pool.clone()),
+        chat::LlmReranker::new(reranker),
         llm,
     )))
 }
@@ -415,7 +466,12 @@ async fn serve(database_url: &str) -> anyhow::Result<()> {
     if std::env::var("GALA_EK_SCAN").as_deref() == Ok("0") {
         tracing::info!("EK-Preise: Auslesen abgeschaltet (GALA_EK_SCAN=0)");
     } else {
-        tokio::spawn(ek::run(state.db.clone(), cfg.llm_url.clone(), stop.clone()));
+        tokio::spawn(ek::run(
+            state.db.clone(),
+            cfg.llm_url.clone(),
+            state.chat_activity.clone(),
+            stop.clone(),
+        ));
     }
 
     let public_listener = tokio::net::TcpListener::bind(cfg.bind)

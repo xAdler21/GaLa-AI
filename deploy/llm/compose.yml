@@ -1,10 +1,11 @@
-# gala-llm: llama-server (OpenAI-kompatibel) auf RTX 3070 + GTX 1070.
+# gala-llm: llama-server (OpenAI-kompatibel) auf RTX 3070 + GTX 1070, dazu ein zweiter
+# llama-server mit dem Reranker für den Dokumenten-Chatbot (Port 8082).
 #
 #   /opt/gala/deploy/common/dc.sh llm up -d
 #
 # Variablen aus /etc/gala/hosts.env und /etc/gala/llm.env.
-# Der Port 8080 wird nur für gala-coordinator und gala-ocr freigegeben
-# (ufw + DOCKER-USER, siehe install.sh).
+# Der Port 8080 wird nur für gala-coordinator und gala-ocr freigegeben, 8082 nur für
+# gala-coordinator (ufw + DOCKER-USER, siehe install.sh).
 
 name: gala
 
@@ -47,10 +48,56 @@ services:
       - --parallel
       - "2"
       - --jinja
-      # Kein "Denken" vor der Antwort (Qwen3): die Denk-Tokens zählen zu max_tokens der
-      # Aufrufer (Chatbot: 1024) und kosten bei 25 Token/s spürbar Zeit.
+      # Denkphase vor der Antwort: off/on/auto und, bei Modellen mit Stufen (gpt-oss), wie
+      # gründlich. Die Denk-Tokens zählen zu max_tokens der Aufrufer und kosten Zeit.
       - --reasoning
       - "${LLM_REASONING:-off}"
+      - --reasoning-effort
+      - "${LLM_REASONING_EFFORT:-default}"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  # Reranker (bge-reranker-v2-m3): bewertet die Treffer der Hybrid-Suche neu
+  # (POST /v1/rerank). Läuft er nicht, sucht der Chatbot ohne ihn weiter.
+  rerank:
+    image: ghcr.io/ggml-org/llama.cpp:${LLAMA_IMAGE_TAG:-server-cuda}
+    container_name: gala-rerank
+    restart: unless-stopped
+    init: true
+    environment:
+      CUDA_DEVICE_ORDER: PCI_BUS_ID
+      # Eine Karte genügt (Modell und Puffer unter 1 GB).
+      CUDA_VISIBLE_DEVICES: ${RERANK_GPU:-0}
+      NVIDIA_VISIBLE_DEVICES: all
+    volumes:
+      - /srv/gala/models:/models:ro
+    ports:
+      - "8082:8080"
+    command:
+      - --model
+      - /models/${RERANK_MODEL:-bge-reranker-v2-m3-Q8_0.gguf}
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8080"
+      - --reranking
+      - --n-gpu-layers
+      - "99"
+      # 4 Slots à 2048 Tokens; ein Paar aus Frage und Treffer hat höchstens ~600.
+      # Nicht-kausale Modelle brauchen die ganze Sequenz in einem Micro-Batch.
+      - --ctx-size
+      - "8192"
+      - --parallel
+      - "4"
+      - --batch-size
+      - "2048"
+      - --ubatch-size
+      - "2048"
     deploy:
       resources:
         reservations:

@@ -53,7 +53,7 @@ pub fn normalize_url(raw: &str) -> CmdResult<String> {
 }
 
 /// Fehlerkette eines reqwest-Fehlers als lesbarer Text (zeigt z. B. TLS-Probleme).
-fn net_err(e: reqwest::Error) -> ApiError {
+pub fn net_err(e: reqwest::Error) -> ApiError {
     let mut msg = if e.is_timeout() {
         "Zeitueberschreitung bei der Verbindung zum Server.".to_owned()
     } else if e.is_connect() {
@@ -261,6 +261,37 @@ pub async fn authed<T: DeserializeOwned>(
         let _ = save_token(app, None);
     }
     result
+}
+
+/// POST mit Bearer-Token fuer eine gestreamte Antwort: liefert die Antwort ungelesen, wenn der
+/// Status passt (sonst den Fehler wie `authed`). Das Zeitlimit reicht fuer mehrere Suchrunden.
+pub async fn authed_stream(
+    app: &AppHandle,
+    client: &Client,
+    path: &str,
+    body: &impl serde::Serialize,
+) -> CmdResult<Response> {
+    let base = require_server(app)?;
+    let token = stored_token(app).ok_or_else(|| err("unauthorized", "Bitte anmelden."))?;
+    let resp = client
+        .post(format!("{base}/api/v1{path}"))
+        .bearer_auth(token)
+        .timeout(Duration::from_secs(600))
+        .json(body)
+        .send()
+        .await
+        .map_err(net_err)?;
+    if resp.status().is_success() {
+        return Ok(resp);
+    }
+    let e = parse::<()>(resp)
+        .await
+        .err()
+        .unwrap_or_else(|| err("bad_response", "Unerwartete Antwort vom Server."));
+    if e.code == "unauthorized" {
+        let _ = save_token(app, None);
+    }
+    Err(e)
 }
 
 /// Abmelden am Server (Antwort egal), danach Token lokal loeschen.

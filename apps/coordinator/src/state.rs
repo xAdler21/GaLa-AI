@@ -6,7 +6,7 @@ use std::time::Duration;
 use db::PgPool;
 
 use crate::auth::LoginLimiter;
-use crate::chatbot::{ChatLog, SharedChatbot};
+use crate::chatbot::{ChatActivity, ChatLog, SharedChatbot};
 use crate::config::Config;
 
 #[derive(Clone)]
@@ -18,6 +18,8 @@ pub struct AppState {
     pub chat: Option<SharedChatbot>,
     /// Letzte Chat-Anfragen für das Admin-Panel.
     pub chat_log: ChatLog,
+    /// Laufende Chats (der EK-Scan pausiert währenddessen).
+    pub chat_activity: ChatActivity,
     /// Kurzer Zeitlimit-Client für den LLM-Zustand im Admin-Panel.
     pub llm_status: Option<Arc<llm::LlmClient>>,
 }
@@ -39,6 +41,7 @@ impl AppState {
             limiter: LoginLimiter::new(5, Duration::from_secs(600)),
             chat,
             chat_log: ChatLog::default(),
+            chat_activity: ChatActivity::default(),
             llm_status,
         }
     }

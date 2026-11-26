@@ -629,8 +629,10 @@ name = "chat"
 version = "0.1.0"
 dependencies = [
  "api-types",
+ "chrono",
  "llm",
  "retrieval",
+ "serde_json",
  "thiserror",
  "tokio",
  "tracing",
@@ -843,6 +845,7 @@ dependencies = [
  "clap",
  "db",
  "export",
+ "futures-util",
  "gaeb",
  "hex",
  "llm",

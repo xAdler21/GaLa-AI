@@ -384,9 +384,10 @@ Beantwortet Fragen zum Inhalt des Netzlaufwerks, z. B. „Welche Pflastersteine 
 3. **Chunking:** seitenbewusst und absatzbasiert, ~2.500 Zeichen mit einem Absatz Überlappung.
 4. **Embeddings:** BGE-M3 (1024 Dimensionen) auf gala-ocr. Speicherung in `chunk.emb` (pgvector, HNSW) plus deutscher Volltextindex (`tsvector`).
 5. **Antwort:**
-   - Hybride Suche: dense + Volltext, zusammengeführt per RRF, Top 8.
-   - Das LLM auf gala-llm antwortet nur aus den nummerierten Quellen und zitiert sie als [1], [2].
-   - Die App zeigt Datei, Seite und Ausschnitt.
+   - Das LLM auf gala-llm sucht selbst (Werkzeuge `suchen`, `seite_lesen`, `ordner_auflisten`, bis zu 3 Runden) und formuliert die Suchanfragen dabei um (Rückfragen, Fachbegriffe, Jahr, Kunde).
+   - Jede Suche: dense + Volltext, zusammengeführt per RRF, 24 Kandidaten; der Reranker (bge-reranker-v2-m3 auf gala-llm) wählt die besten 6.
+   - Das LLM antwortet nur aus den nummerierten Quellen und zitiert sie als [1], [2]. Die Antwort kommt gestreamt in der App an, vorher zeigt sie die Suchschritte.
+   - Die App zeigt Datei, Seite und Ausschnitt der zitierten Quellen.
 
 **Tipps für die Digitalisierung:**
 - 300 dpi in Graustufen scannen.

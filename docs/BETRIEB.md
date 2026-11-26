@@ -10,7 +10,7 @@ Zielsystem: Ubuntu Server 24.04 LTS mit Docker Engine und compose-Plugin. Das Re
 |---|---|---|---|
 | `gala-coordinator` | keine | Postgres 17 + pgvector, `coordinator`, `worker --role cpu`, Caddy (TLS) | `/srv/gala/data` (Datei-Store, per NFS an gala-ocr), `/var/lib/gala/state` (Update-Anfrage/-Status), `/var/lib/gala/caddy`, `/srv/gala/backup`, `/mnt/archiv` (NAS, ro) |
 | `gala-ocr` | keine | `worker --role vision` (OCR, Embeddings, auf der CPU) | `/srv/gala/data` (NFS von gala-coordinator), `/mnt/archiv` (NAS, ro) |
-| `gala-llm` | RTX 3070 + GTX 1070 | `llama-server` auf `:8080` | `/srv/gala/models` (GGUF-Dateien) |
+| `gala-llm` | RTX 3070 + GTX 1070 | `llama-server` auf `:8080`, Reranker auf `:8082` | `/srv/gala/models` (GGUF-Dateien) |
 
 Ports und Firewall (identisch zu CLAUDE.md):
 
@@ -22,6 +22,7 @@ Ports und Firewall (identisch zu CLAUDE.md):
 | Postgres | `gala-coordinator:5432` | gala-ocr |
 | NFS | `gala-coordinator:2049` | gala-ocr |
 | llama-server | `gala-llm:8080` | gala-coordinator, gala-ocr |
+| Reranker | `gala-llm:8082` | gala-coordinator |
 
 **Firewall-Falle.** Docker trägt veröffentlichte Ports direkt in iptables ein und umgeht damit die INPUT-Regeln von `ufw`. Eine reine `ufw`-Regel schützt Postgres, `:8081` und `:8080` (llama) deshalb nicht. Die `install.sh`-Skripte setzen darum zusätzlich den Dienst `gala-docker-firewall.service`, der in der Kette `DOCKER-USER` die erlaubten Quellen je Port festlegt (`deploy/common/docker-firewall.sh`). Prüfen mit `sudo iptables -S GALA-FW`.
 
@@ -293,7 +294,7 @@ Posten auf gala-coordinator:
 | Docker-Images und Build-Cache | 10–20 GB |
 | Backups (14 Dumps) | wenige GB bis einige 10 GB |
 
-gala-ocr braucht wenig: Betriebssystem, das Worker-Image ohne CUDA in zwei Ständen während eines Updates und die OCR-Modelle. gala-llm braucht vor allem Platz für die Modelle (Qwen 14B Q4_K_M ca. 9 GB). Die Plattengrößen oben sind geschätzt; `disk.sh report` zeigt die echte Belegung. Baut eine VM ihre Images selbst (`GALA_IMAGE_SOURCE=build`), kommen Rust-Image und Cargo-Cache dazu, grob 10 GB mehr.
+gala-ocr braucht wenig: Betriebssystem, das Worker-Image ohne CUDA in zwei Ständen während eines Updates und die OCR-Modelle. gala-llm braucht vor allem Platz für die Modelle (gpt-oss-20b 12,1 GB, Reranker 0,6 GB, Qwen3-14B als Rückweg 9 GB) und zwei llama.cpp-Images während eines Wechsels (je ~3 GB). Die Plattengrößen oben sind geschätzt; `disk.sh report` zeigt die echte Belegung. Baut eine VM ihre Images selbst (`GALA_IMAGE_SOURCE=build`), kommen Rust-Image und Cargo-Cache dazu, grob 10 GB mehr.
 
 Ein Platzcheck: `sudo /bin/bash /opt/gala/deploy/common/disk.sh report` (entspricht `df -h /var/lib/docker` und `docker system df`). Die Update-Skripte brechen ab, bevor sie Images laden oder bauen, wenn weniger als 8 GB frei sind (`GALA_BUILD_MIN_FREE_GB`), und löschen danach das vorherige Image (`disk.sh cleanup`). Ein alter Build-Cache aus der Zeit lokaler Builds lässt sich von Hand löschen: `docker builder prune -a`.
 
@@ -321,10 +322,12 @@ Ein Platzcheck: `sudo /bin/bash /opt/gala/deploy/common/disk.sh report` (entspri
 - **Split prüfen:** `docker logs gala-llama 2>&1 | grep -Ei 'cuda|offload|buffer|split'` muss beide Karten und die verteilten Layer zeigen; `nvidia-smi` zeigt VRAM-Belegung auf beiden Karten. Ist eine Karte fast leer, den `LLM_TENSOR_SPLIT` ändern (z. B. `3,2`: mehr auf die 3070).
 - **VRAM:** `LLM_CTX` ist der Gesamt-Kontext, geteilt durch die 2 Slots (`--parallel 2`). Bei „out of memory“: `LLM_CTX` senken, kleinere Quantisierung oder anderes Modell wählen.
 - **Image pinnen:** `LLAMA_IMAGE_TAG` in `/etc/gala/llm.env` auf einen konkreten Build setzen (`server-cuda-b<nummer>`), damit ein Update nicht unbemerkt eine neue llama.cpp-Version zieht. Für ein bewusstes Upgrade den Tag ändern und `update.sh` laufen lassen (ändert sich nur die Env-Datei, die nicht im Repo liegt, `docker compose pull && up -d` von Hand ausführen).
-- **Denkphase:** Qwen3 „denkt“ standardmäßig vor jeder Antwort. Diese Tokens zählen zu `max_tokens` des Aufrufers (Chatbot: 1024) und kosten Zeit; deshalb startet llama-server mit `--reasoning off` (`LLM_REASONING` in `llm.env`).
-- **Stand 20.11.2026:** Qwen3-14B Q4_K_M auf Build `server-cuda-b12464`, Layer-Split `1,1`, `LLM_CTX=16384`: je Karte rund 5,7 von 8 GB belegt, etwa 22–25 Token/s beim Generieren. Mit den freien 2 GB je Karte ließe sich der Kontext ungefähr verdoppeln (`LLM_CTX=32768`), falls der Chatbot mehr Quellen mitschicken soll.
+- **Denkphase:** Diese Tokens zählen zu `max_tokens` des Aufrufers und kosten Zeit. Steuerung über `LLM_REASONING` (off/on/auto) und `LLM_REASONING_EFFORT` (bei gpt-oss `low`) in `llm.env`.
+- **Reranker:** zweiter llama-server (`gala-rerank`, Port 8082, nur vom Coordinator erreichbar) mit `bge-reranker-v2-m3` auf GPU 0 (`RERANK_GPU`), ~0,5 GB VRAM. Prüfen: `docker logs gala-rerank`; vom Coordinator aus `curl http://gala-llm:8082/health`. Fällt er aus, sucht der Chatbot ohne ihn weiter (Warnung im Coordinator-Log).
+- **Stand 26.11.2026:** gpt-oss-20b MXFP4 auf Build `server-cuda-b12723`, Layer-Split `1,1`, `LLM_CTX=32768`, Reranker auf der 3070: 7,0 bzw. 6,0 von 8 GB belegt. Gemessen bei kaltem Prompt: Einlesen ~1500 Token/s, Antwort ~65 Token/s; die erste Anfrage nach dem Start ist deutlich langsamer (Aufwärmen). Zum Vergleich Qwen3-14B Q4_K_M auf b12464: ~470 und ~22 Token/s.
+- **Verworfen (26.11.2026):** Inkling 2 Mini (26B MoE, UD-IQ3_XXS 11,7 GB). Passt nur mit verkleinertem Kontext; Flash-Attention läuft auf der GTX 1070 nicht, dadurch ~200 Token/s Einlesen und 13 Token/s Antwort.
 - Test: `curl http://gala-llm:8080/health` von gala-coordinator aus; von einer anderen IP aus muss die Verbindung scheitern.
-- Chatbot ohne App prüfen (Antwort und Quellen mit Score): `sudo /opt/gala/deploy/common/dc.sh coordinator exec coordinator coordinator ask "Was hat das Pflaster bei der Kinderkrippe Pentling gekostet?"`.
+- Chatbot ohne App prüfen (Suchschritte, Dauer, Antwort und zitierte Quellen): `sudo /opt/gala/deploy/common/dc.sh coordinator exec coordinator coordinator ask "Was hat das Pflaster bei der Kinderkrippe Pentling gekostet?"`. Mehrere Fragen: `--file <datei>` (eine Frage je Zeile, `#` = Kommentar).
 
 ### 8.3 gala-ocr: OCR auf der CPU
 

@@ -8,7 +8,7 @@ use api_types::client::{
 use axum::extract::rejection::JsonRejection;
 use axum::extract::{FromRequestParts, Path, State};
 use axum::http::request::Parts;
-use axum::http::{HeaderMap, StatusCode};
+use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router, middleware};
@@ -30,6 +30,7 @@ pub fn router(state: AppState) -> Router<AppState> {
         .route("/api/v1/auth/logout", post(logout))
         .route("/api/v1/me", get(me))
         .route("/api/v1/chat", post(chat))
+        .route("/api/v1/chat/stream", post(chat_stream))
         .route(
             "/api/v1/updates/{target}/{arch}/{current_version}",
             get(update_check),
@@ -185,9 +186,46 @@ async fn chat(
     payload: Result<Json<ChatRequest>, JsonRejection>,
 ) -> Result<Json<ChatResponse>, ApiErr> {
     let Json(req) = payload.map_err(|e| ApiErr::bad_request(format!("Ungültige Anfrage: {e}")))?;
-    chatbot::run(state.chat.as_deref(), &req, &state.chat_log, &user.username)
-        .await
-        .map(Json)
+    chatbot::run(
+        state.chat.as_deref(),
+        &req,
+        &state.chat_log,
+        &user.username,
+        &state.chat_activity,
+        &|_| {},
+    )
+    .await
+    .map(Json)
+}
+
+/// Wie `chat`, aber als NDJSON-Strom: Statusmeldungen, Antwort-Stücke, zuletzt `done` oder
+/// `error` (`ChatStreamEvent`). Fehler vor dem Start (leere Frage, 501) kommen als normale
+/// Fehlerantwort. Bricht die App ab, wird auch die Anfrage ans Modell abgebrochen.
+async fn chat_stream(
+    State(state): State<AppState>,
+    AuthUser(user): AuthUser,
+    payload: Result<Json<ChatRequest>, JsonRejection>,
+) -> Result<Response, ApiErr> {
+    let Json(req) = payload.map_err(|e| ApiErr::bad_request(format!("Ungültige Anfrage: {e}")))?;
+    chatbot::check(state.chat.as_deref(), &req)?;
+    let Some(bot) = state.chat.clone() else {
+        return Err(ApiErr::not_implemented(chatbot::NOT_ENABLED));
+    };
+    let body = chatbot::stream(
+        bot,
+        req,
+        state.chat_log.clone(),
+        user.username,
+        state.chat_activity.clone(),
+    );
+    Ok((
+        [
+            (header::CONTENT_TYPE, "application/x-ndjson"),
+            (header::CACHE_CONTROL, "no-cache"),
+        ],
+        body,
+    )
+        .into_response())
 }
 
 async fn update_check(
